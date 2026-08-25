@@ -502,4 +502,12 @@ clar(ctx,
      test_sources_ant_glob="test_app_glance_service.c",
      override_includes=['dummy_board'])
 
+clar(ctx,
+     sources_ant_glob=(
+         " src/fw/services/analytics/native.c"
+         " tests/fakes/fake_rtc.c"
+     ),
+     test_sources_ant_glob="test_analytics_native.c",
+     platforms=['asterix'])
+
 # vim:filetype=python
