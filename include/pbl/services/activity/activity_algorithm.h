@@ -60,7 +60,8 @@ typedef struct PBL_PACKED {
 //   12: Added total heart rate weight
 //   13: Added heart rate zone
 //   14: Added Quiet Time sleep intent hint
-#define ALG_DLS_MINUTES_RECORD_VERSION 14
+//   15: Added sleep classifier diagnostics
+#define ALG_DLS_MINUTES_RECORD_VERSION 15
 
 _Static_assert((ALG_DLS_MINUTES_RECORD_VERSION & (1 << 2)) > 0,
                "Android 3.10-4.0 requires bit 2 to be set");
@@ -88,12 +89,14 @@ typedef struct PBL_PACKED {
 
   // New fields added in version 14
   uint8_t sleep_intent_hint;  // Quiet Time was active during this minute
+
+  // New fields added in version 15
+  uint32_t sleep_score;       // Kraepelin score for this minute
+  uint16_t sleep_flags;       // KAlgSleepDiagnosticFlags
 } AlgMinuteDLSSample;
 
-  // New fields added in version 14
-  uint8_t spo2_percent; // blood oxygen saturation (%) measured this minute, 0 = none
-  uint8_t spo2_quality; // SpO2 signal quality (HeartRateQuality enum), 0 = none
-} AlgMinuteDLSSample;
+_Static_assert(sizeof(AlgMinuteDLSSample) == 23, "Version 15 minute samples must be 23 bytes");
+
 
 // We store minute data in this struct into a circular buffer and then transfer from there to
 // data logging and to the minute file in PFS as we get a batch big enough.
