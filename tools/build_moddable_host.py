@@ -32,6 +32,27 @@ def platform_subdir():
     raise SystemExit(f"Unsupported platform: {sys.platform}")
 
 
+def build_tools(makefiles_dir, moddable_path, pdir, env):
+    if pdir != "lin":
+        subprocess.run(["make"], cwd=str(makefiles_dir), env=env, check=True)
+        return
+
+    # The aggregate Linux target also builds GTK debugger applications.
+    makefiles = [
+        moddable_path / "xs" / "makefiles" / "lin" / "xsc.mk",
+        moddable_path / "xs" / "makefiles" / "lin" / "xsid.mk",
+        moddable_path / "xs" / "makefiles" / "lin" / "xsl.mk",
+        makefiles_dir / "tools.mk",
+    ]
+    for makefile in makefiles:
+        subprocess.run(
+            ["make", "GOAL=release", "-f", str(makefile)],
+            cwd=str(makefiles_dir),
+            env=env,
+            check=True,
+        )
+
+
 def main():
     repo_root = pathlib.Path(__file__).resolve().parent.parent
     moddable_path = repo_root / "third_party" / "moddable" / "moddable"
@@ -46,11 +67,13 @@ def main():
 
     env = os.environ.copy()
     env["MODDABLE"] = str(moddable_path)
+    env["XS_DIR"] = str(moddable_path / "xs")
+    env["BUILD_DIR"] = str(moddable_path / "build")
     env["PATH"] = str(tools_path) + os.pathsep + env.get("PATH", "")
 
     makefiles_dir = moddable_path / "build" / "makefiles" / pdir
     print(f"Building Moddable tools in {makefiles_dir}...", flush=True)
-    subprocess.run(["make"], cwd=str(makefiles_dir), env=env, check=True)
+    build_tools(makefiles_dir, moddable_path, pdir, env)
 
     host_dir = moddable_path / "build" / "devices" / "pebble" / "host"
     print(f"Compiling Moddable host app in {host_dir}...", flush=True)
