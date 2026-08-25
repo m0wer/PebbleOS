@@ -86,7 +86,7 @@ clar(ctx,
          " tests/fakes/fake_rtc.c" \
          " tests/fakes/fake_spi_flash.c",
      test_sources_ant_glob = "test_activity_algorithm_kraepelin.c",
-     defines=['DUMA_DISABLED'],  # DUMA false-positive, therefore disabled
+     defines=['DUMA_DISABLED', 'CONFIG_HRM'],  # DUMA false-positive, therefore disabled
      override_includes=['dummy_board'])
 
 

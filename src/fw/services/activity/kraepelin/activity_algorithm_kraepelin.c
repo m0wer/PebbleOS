@@ -1041,8 +1041,13 @@ static void prv_activity_update_states(time_t utc_sec, AlgMinuteRecord *record_o
   // kraepelin, which can take 30+ minutes to fire and is easily defeated by ambient vibration
   // (see FIRM-1901, FIRM-1804, FIRM-1533). plugged_in keeps its original "charging" meaning
   // in the logged record.
+#ifdef CONFIG_HRM
   const bool hrm_offwrist = activity_metrics_prv_is_hrm_offwrist(utc_sec);
   const bool hrm_worn = activity_metrics_prv_is_hrm_worn(utc_sec);
+#else
+  const bool hrm_offwrist = false;
+  const bool hrm_worn = false;
+#endif
   const bool not_worn = m_rec->base.plugged_in || hrm_offwrist;
 
   ACTIVITY_LOG_DEBUG("minute handler: steps: %" PRIu8 ", orientation: 0x%" PRIx8 ", vmc: %" PRIu16
