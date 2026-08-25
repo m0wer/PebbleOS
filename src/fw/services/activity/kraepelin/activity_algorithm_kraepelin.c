@@ -37,10 +37,14 @@ PBL_LOG_MODULE_DECLARE(service_activity, CONFIG_SERVICE_ACTIVITY_LOG_LEVEL);
 #define ALG_MINUTE_DATA_FILE_NAME  "activity_sleep"
 
 
+// A score for utc_now - 5 minutes belongs four completed records before the current record.
+#define ALG_DLS_SLEEP_DIAGNOSTIC_LAG_RECORDS 4
+
 // How many records we need to store in our circular buffer
 // +1 for mgmt overhead
 #define ALG_MINUTE_CBUF_NUM_RECORDS  (MAX(ALG_MINUTES_PER_DLS_RECORD, ALG_MINUTES_PER_FILE_RECORD) \
-                                       + KALG_MAX_UNCERTAIN_SLEEP_M + 1)
+                                        + KALG_MAX_UNCERTAIN_SLEEP_M \
+                                        + ALG_DLS_SLEEP_DIAGNOSTIC_LAG_RECORDS + 1)
 
 // ---------------------------------------------------------------------------------------------
 // Globals
@@ -557,6 +561,9 @@ static bool NOINLINE prv_prepare_minute_data(uint16_t uncertain_m, time_t sleep_
 
   int16_t certain_m = (shared_circular_buffer_get_read_space_remaining(
       &s_alg_state->minute_data_cbuf, cbuf_client) / sizeof(AlgMinuteRecord)) - uncertain_m;
+  if (dls_record) {
+    certain_m = MAX(0, certain_m - ALG_DLS_SLEEP_DIAGNOSTIC_LAG_RECORDS);
+  }
   int minutes_this_record = MIN(certain_m, minutes_per_record);
   if (minutes_this_record == 0) {
     // nothing to send, even if we really wanted to
@@ -644,6 +651,49 @@ static void prv_send_minute_data(uint16_t uncertain_m, time_t sleep_start_utc,
       }
     }
   }
+}
+
+
+// -------------------------------------------------------------------------------------------
+static bool prv_apply_sleep_diagnostics_to_client(SharedCircularBufferClient *client,
+                                                  const KAlgSleepDiagnostics *diagnostics) {
+  SharedCircularBuffer *cbuf = &s_alg_state->minute_data_cbuf;
+  const uint16_t available = shared_circular_buffer_get_read_space_remaining(cbuf, client);
+  if (available % sizeof(AlgMinuteRecord)) {
+    PBL_LOG_WRN("Invalid minute buffer while annotating sleep diagnostics");
+    return false;
+  }
+
+  uint16_t read_index = client->read_index;
+  for (uint16_t offset = 0; offset < available; offset += sizeof(AlgMinuteRecord)) {
+    if ((cbuf->buffer_size - read_index) < (int)sizeof(AlgMinuteRecord)) {
+      PBL_LOG_WRN("Wrapped minute record while annotating sleep diagnostics");
+      return false;
+    }
+    AlgMinuteRecord *record = (AlgMinuteRecord *)&cbuf->buffer[read_index];
+    if (record->utc_sec == diagnostics->sample_utc) {
+      record->data.sleep_score = diagnostics->score;
+      record->data.sleep_flags = diagnostics->flags;
+      return true;
+    }
+    read_index = (read_index + sizeof(AlgMinuteRecord)) % cbuf->buffer_size;
+  }
+  return false;
+}
+
+
+// -------------------------------------------------------------------------------------------
+static void prv_apply_sleep_diagnostics(const KAlgSleepDiagnostics *diagnostics) {
+  if (!(diagnostics->flags & KAlgSleepDiagnosticFlag_ScoreValid)) {
+    return;
+  }
+
+  if (prv_apply_sleep_diagnostics_to_client(&s_alg_state->dls_minute_data_client, diagnostics) ||
+      prv_apply_sleep_diagnostics_to_client(&s_alg_state->file_minute_data_client, diagnostics)) {
+    return;
+  }
+  PBL_LOG_DBG("No retained minute for sleep diagnostics at %" PRIu32,
+              (uint32_t)diagnostics->sample_utc);
 }
 
 
@@ -1005,6 +1055,15 @@ static void prv_activity_update_states(time_t utc_sec, AlgMinuteRecord *record_o
                          m_rec->base.orientation, not_worn, sleep_intent_hint,
                          m_rec->resting_calories, m_rec->active_calories, minute_distance_mm,
                          shutting_down, prv_create_activity_session_cb, NULL);
+
+  KAlgSleepDiagnostics sleep_diagnostics;
+  kalg_get_sleep_diagnostics(s_alg_state->k_state, &sleep_diagnostics);
+  if (sleep_diagnostics.flags & KAlgSleepDiagnosticFlag_ScoreValid) {
+    if (hrm_offwrist) {
+      sleep_diagnostics.flags |= KAlgSleepDiagnosticFlag_HrmOffWristInput;
+    }
+    prv_apply_sleep_diagnostics(&sleep_diagnostics);
+  }
 }
 
 // ------------------------------------------------------------------------------------
