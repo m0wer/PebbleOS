@@ -59,7 +59,7 @@ typedef struct PBL_PACKED {
 //    7: Added heart rate bpm
 //   12: Added total heart rate weight
 //   13: Added heart rate zone
-//   14: Added SpO2 percent and quality
+//   14: Added Quiet Time sleep intent hint
 #define ALG_DLS_MINUTES_RECORD_VERSION 14
 
 _Static_assert((ALG_DLS_MINUTES_RECORD_VERSION & (1 << 2)) > 0,
@@ -84,7 +84,11 @@ typedef struct PBL_PACKED {
   uint16_t heart_rate_total_weight_x100; // total weight of all HR values multiplied by 100
 
   // New fields added in version 13
-  uint8_t heart_rate_zone; // the hr zone for this minute
+  uint8_t heart_rate_zone;           // the hr zone for this minute
+
+  // New fields added in version 14
+  uint8_t sleep_intent_hint;  // Quiet Time was active during this minute
+} AlgMinuteDLSSample;
 
   // New fields added in version 14
   uint8_t spo2_percent; // blood oxygen saturation (%) measured this minute, 0 = none
