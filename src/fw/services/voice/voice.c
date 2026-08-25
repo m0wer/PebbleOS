@@ -50,6 +50,7 @@ static PebbleMutex* s_lock = NULL;
 // Handle requests from apps
 static bool s_from_app;
 static Uuid s_app_uuid;
+static VoiceEndpointSessionType s_session_type;
 
 static AudioEndpointSessionId s_session_id = AUDIO_ENDPOINT_SESSION_INVALID_ID;
 static TimerID s_timeout = TIMER_INVALID_ID;
@@ -142,6 +143,7 @@ static void prv_cancel_early_session(void) {
 static void prv_reset(void) {
   s_state = SessionState_Idle;
   s_session_id = AUDIO_ENDPOINT_SESSION_INVALID_ID;
+  s_session_type = VoiceEndpointSessionTypeCount;
 }
 
 static void prv_cancel_session(void) {
@@ -354,6 +356,7 @@ VoiceSessionId voice_start_dictation(VoiceEndpointSessionType session_type) {
     s_session_generation = 1;
   }
   s_teardown_in_progress = false;
+  s_session_type = session_type;
   PBL_LOG_DBG("Setting state to StartSession");
   s_state = SessionState_StartSession;
 
@@ -656,6 +659,32 @@ void voice_handle_dictation_result(VoiceEndpointResult result, AudioEndpointSess
   }
 
   prv_send_event(VoiceEventTypeSessionResult, VoiceStatusSuccess, event_data);
+
+unlock:
+  prv_reset();
+  mutex_unlock(s_lock);
+}
+
+bool voice_is_recording_session(void) {
+  mutex_lock(s_lock);
+  const bool is_recording = (s_session_type == VoiceEndpointSessionTypeRecording);
+  mutex_unlock(s_lock);
+  return is_recording;
+}
+
+void voice_handle_recording_result(VoiceEndpointResult result, AudioEndpointSessionId session_id,
+                                   bool app_initiated, Uuid *app_uuid) {
+  mutex_lock(s_lock);
+
+  if (s_session_type != VoiceEndpointSessionTypeRecording) {
+    result = VoiceEndpointResultFailInvalidMessage;
+  }
+
+  if (!prv_handle_dictation_nlp_result_common(result, session_id, app_initiated, app_uuid)) {
+    goto unlock;
+  }
+
+  prv_send_event(VoiceEventTypeSessionResult, VoiceStatusSuccess, NULL);
 
 unlock:
   prv_reset();

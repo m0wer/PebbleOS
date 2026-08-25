@@ -24,6 +24,7 @@
         "applib/graphics/gbitmap_sequence.h",
         "applib/graphics/gtypes.h",
         "applib/health_service_private.h",
+        "applib/voice/audio_recording_session_private.h",
         "applib/voice/dictation_session_private.h",
         "applib/voice/transcription_dialog.h",
         "applib/voice/voice_window_private.h",
@@ -260,6 +261,12 @@
         "dependencies": ["TranscriptionDialog", "Layer", "Layer", "StatusBarLayer", "TextLayer", 
                          "KinoLayer", "Window", "EventServiceInfo"],
         "_comment": "Generously padded because it's not feature complete yet (only 3.x)"
+    }, {
+        "name": "AudioRecordingSession",
+        "size_3x_padding": 1196,
+        "size_3x": 1284,
+        "dependencies": ["EventServiceInfo", "EventServiceInfo"],
+        "_comment": "Matches DictationSession allocation behavior (only 3.x)"
     }, {
         "name": "DictationSession",
         "size_3x_padding": 1196,
