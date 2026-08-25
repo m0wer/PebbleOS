@@ -2407,6 +2407,43 @@ static void prv_advance_time_hr(uint32_t num_sec, uint8_t bpm, HRMQuality qualit
 
 
 // ---------------------------------------------------------------------------------------
+// Test that only decisive, current HRM readings affect worn status
+void test_activity__hrm_worn_status(void) {
+  const time_t now_utc = rtc_get_time();
+  PebbleHRMEvent hrm_event = {
+      .event_type = HRMEvent_BPM,
+      .bpm.bpm = 100,
+      .bpm.quality = HRMQuality_OffWrist,
+  };
+
+  prv_hrm_subscription_cb(&hrm_event, NULL);
+  cl_assert(activity_metrics_prv_is_hrm_offwrist(now_utc));
+  cl_assert(!activity_metrics_prv_is_hrm_worn(now_utc));
+
+  hrm_event.bpm.quality = HRMQuality_Worst;
+  prv_hrm_subscription_cb(&hrm_event, NULL);
+  cl_assert(activity_metrics_prv_is_hrm_offwrist(now_utc));
+  cl_assert(!activity_metrics_prv_is_hrm_worn(now_utc));
+
+  hrm_event.bpm.quality = HRMQuality_Acceptable;
+  prv_hrm_subscription_cb(&hrm_event, NULL);
+  cl_assert(!activity_metrics_prv_is_hrm_offwrist(now_utc));
+  cl_assert(activity_metrics_prv_is_hrm_worn(now_utc));
+
+  hrm_event.bpm.quality = HRMQuality_OffWrist;
+  prv_hrm_subscription_cb(&hrm_event, NULL);
+  hrm_event.bpm.bpm = ACTIVITY_DEFAULT_MIN_HR - 1;
+  hrm_event.bpm.quality = HRMQuality_Excellent;
+  prv_hrm_subscription_cb(&hrm_event, NULL);
+  cl_assert(activity_metrics_prv_is_hrm_offwrist(now_utc));
+  cl_assert(!activity_metrics_prv_is_hrm_worn(now_utc));
+
+  activity_metrics_prv_set_hrm_worn_status(now_utc + 1, false /*is_offwrist*/);
+  cl_assert(!activity_metrics_prv_is_hrm_worn(now_utc));
+}
+
+
+// ---------------------------------------------------------------------------------------
 // Test that we subscribe to the HR events at the expected times
 void test_activity__hrm_sampling_period(void) {
   // Start activity tracking. This method assumes it can be called from any task, so we must

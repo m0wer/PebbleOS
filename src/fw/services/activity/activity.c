@@ -174,10 +174,12 @@ T_STATIC void prv_hrm_subscription_cb(PebbleHRMEvent *hrm_event, void *context) 
     uint32_t now_uptime_ts = time_get_uptime_seconds();
     time_t now_utc = rtc_get_time();
 
-    // Cache the worn-status from this event so sleep tracking can use it as a strong off-wrist
-    // signal (PPG off-wrist detection is far more reliable than the accel-only heuristics).
-    activity_metrics_prv_set_hrm_worn_status(
-        now_utc, hrm_event->bpm.quality == HRMQuality_OffWrist);
+    // Cache decisive worn status so sleep tracking can supplement the accel-only heuristics.
+    if (hrm_event->bpm.quality == HRMQuality_OffWrist) {
+      activity_metrics_prv_set_hrm_worn_status(now_utc, true /*is_offwrist*/);
+    } else if (valid_hr_reading && hrm_event->bpm.quality >= HRMQuality_Acceptable) {
+      activity_metrics_prv_set_hrm_worn_status(now_utc, false /*is_offwrist*/);
+    }
 
     if (valid_hr_reading) {
       // Update the heart rate metrics
