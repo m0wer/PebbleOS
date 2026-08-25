@@ -155,6 +155,7 @@ uint32_t kalg_analyze_finish_epoch(KAlgState *state);
 //                       (caller passes "plugged into charger" OR'd with any other definite
 //                       not-worn hints such as a recent HRM off-wrist reading). Treated as a
 //                       hard "not worn" signal for sleep detection.
+// @param[in] definitely_worn true if a recent HRM reading confirms the watch is being worn.
 // @param[in] sleep_intent_hint true when an optional external signal suggests the user intends
 //                              to sleep during this minute.
 // @param[in] resting_calories number of resting calories burned in the last minute
@@ -164,9 +165,9 @@ uint32_t kalg_analyze_finish_epoch(KAlgState *state);
 //            session that it finds.
 // @param[in] context passed to the sessions_cb
 void kalg_activities_update(KAlgState *state, time_t utc_now, uint16_t steps, uint16_t vmc,
-                            uint8_t orientation, bool definitely_not_worn, bool sleep_intent_hint,
-                            uint32_t resting_calories, uint32_t active_calories,
-                            uint32_t distance_mm, bool shutting_down,
+                            uint8_t orientation, bool definitely_not_worn, bool definitely_worn,
+                            bool sleep_intent_hint, uint32_t resting_calories,
+                            uint32_t active_calories, uint32_t distance_mm, bool shutting_down,
                             KAlgActivitySessionCallback sessions_cb, void *context);
 
 // Get diagnostics for the most recent activity update. ScoreValid is set only for a normally

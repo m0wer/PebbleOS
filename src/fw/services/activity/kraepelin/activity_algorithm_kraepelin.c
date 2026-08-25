@@ -1041,6 +1041,7 @@ static void prv_activity_update_states(time_t utc_sec, AlgMinuteRecord *record_o
   // (see FIRM-1901, FIRM-1804, FIRM-1533). plugged_in keeps its original "charging" meaning
   // in the logged record.
   const bool hrm_offwrist = activity_metrics_prv_is_hrm_offwrist(utc_sec);
+  const bool hrm_worn = activity_metrics_prv_is_hrm_worn(utc_sec);
   const bool not_worn = m_rec->base.plugged_in || hrm_offwrist;
 
   ACTIVITY_LOG_DEBUG("minute handler: steps: %" PRIu8 ", orientation: 0x%" PRIx8 ", vmc: %" PRIu16
@@ -1051,7 +1052,7 @@ static void prv_activity_update_states(time_t utc_sec, AlgMinuteRecord *record_o
 
   // Pass the minute data onto the activity detection logic
   kalg_activities_update(s_alg_state->k_state, utc_sec, m_rec->base.steps, m_rec->base.vmc,
-                         m_rec->base.orientation, not_worn, sleep_intent_hint,
+                         m_rec->base.orientation, not_worn, hrm_worn, sleep_intent_hint,
                          m_rec->resting_calories, m_rec->active_calories, minute_distance_mm,
                          shutting_down, prv_create_activity_session_cb, NULL);
 

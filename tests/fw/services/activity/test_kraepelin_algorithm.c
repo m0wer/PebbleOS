@@ -1606,9 +1606,9 @@ void test_kraepelin_algorithm__sleep_tests(void) {
       const bool shutting_down = (entry->force_shut_down_at == i);
       kalg_activities_update(s_kalg_state, now, entry->samples[i].v5_fields.steps, vmc,
                              entry->samples[i].v5_fields.orientation,
-                             entry->samples[i].v5_fields.plugged_in, false /*sleep_intent_hint*/,
-                             0 /*rest_cals*/, 0 /*active_cals*/, 0 /*distance*/, shutting_down,
-                             prv_sleep_session_callback, NULL);
+                             entry->samples[i].v5_fields.plugged_in, false /*definitely_worn*/,
+                             false /*sleep_intent_hint*/, 0 /*rest_cals*/, 0 /*active_cals*/,
+                             0 /*distance*/, shutting_down, prv_sleep_session_callback, NULL);
       if (shutting_down) {
         break;
       }
@@ -1767,8 +1767,9 @@ void test_kraepelin_algorithm__activity_tests(void) {
       const bool shutting_down = (entry->force_shut_down_at == i);
       kalg_activities_update(s_kalg_state, now, entry->samples[i].v5_fields.steps, 0 /*vmc*/,
                              0 /*orientation*/, false /*definitely_not_worn*/,
-                             false /*sleep_intent_hint*/, 0 /*rest_cals*/, 0 /*active_cals*/,
-                             0 /*distance*/, shutting_down, prv_activity_session_callback, NULL);
+                             false /*definitely_worn*/, false /*sleep_intent_hint*/,
+                             0 /*rest_cals*/, 0 /*active_cals*/, 0 /*distance*/, shutting_down,
+                             prv_activity_session_callback, NULL);
       if (shutting_down) {
         break;
       }
@@ -1995,10 +1996,10 @@ static void prv_feed_activity_minutes(KAlgTestActivityMinute *samples, int sampl
     // NOTE: We feed in a significant VMC to simulate activity so that the sleep algorithm
     // doesn't think we're sleeping
     kalg_activities_update(s_kalg_state, now, samples[i].steps, 7000 /*vmc*/, 0 /*orientation*/,
-                           true /*definitely_not_worn*/, false /*sleep_intent_hint*/,
-                           samples[i].resting_calories, samples[i].active_calories,
-                           samples[i].distance_mm, false /* shutting_down */,
-                           prv_activity_session_callback, NULL);
+                           true /*definitely_not_worn*/, false /*definitely_worn*/,
+                           false /*sleep_intent_hint*/, samples[i].resting_calories,
+                           samples[i].active_calories, samples[i].distance_mm,
+                           false /* shutting_down */, prv_activity_session_callback, NULL);
     now += SECONDS_PER_MINUTE;
     rtc_set_time(now);
   }
@@ -2165,10 +2166,10 @@ void test_kraepelin_algorithm__sleep_stats(void) {
     uint16_t vmc = samples[i].vmc;
     // Convert from the old compressed VMC to the new uncompressed one
     vmc = vmc * vmc * 1850 / 1250;
-    kalg_activities_update(s_kalg_state, now, samples[i].steps, vmc, samples[i].orientation,
-                           samples[i].plugged_in, false /*sleep_intent_hint*/, 0 /*rest_cals*/,
-                           0 /*active_cals*/, 0 /*distance*/, false /* shutting_down */,
-                           prv_sleep_session_callback, NULL);
+    kalg_activities_update(
+        s_kalg_state, now, samples[i].steps, vmc, samples[i].orientation, samples[i].plugged_in,
+        false /*definitely_worn*/, false /*sleep_intent_hint*/, 0 /*rest_cals*/, 0 /*active_cals*/,
+        0 /*distance*/, false /* shutting_down */, prv_sleep_session_callback, NULL);
 
     // This particular sample has sleep from minute 32 to 353
     const int k_sleep_start_m = 32;
@@ -2228,10 +2229,11 @@ static void prv_synth_end(void) {
 }
 
 static void prv_synth_minute(uint16_t vmc, uint8_t orientation, bool definitely_not_worn,
-                             bool sleep_intent_hint) {
+                             bool definitely_worn, bool sleep_intent_hint) {
   kalg_activities_update(s_kalg_state, s_synth_now, 0 /*steps*/, vmc, orientation,
-                         definitely_not_worn, sleep_intent_hint, 0 /*rest_cals*/, 0 /*active_cals*/,
-                         0 /*distance*/, false /*shutting_down*/, prv_sleep_session_callback, NULL);
+                         definitely_not_worn, definitely_worn, sleep_intent_hint, 0 /*rest_cals*/,
+                         0 /*active_cals*/, 0 /*distance*/, false /*shutting_down*/,
+                         prv_sleep_session_callback, NULL);
   KAlgSleepDiagnostics diagnostics;
   kalg_get_sleep_diagnostics(s_kalg_state, &diagnostics);
   s_synth_diagnostic_flags |= diagnostics.flags;
@@ -2242,12 +2244,14 @@ static void prv_synth_minute(uint16_t vmc, uint8_t orientation, bool definitely_
 void test_kraepelin_algorithm__sleep_diagnostics_are_only_valid_for_scored_minutes(void) {
   prv_synth_start();
   for (int i = 0; i < 8; i++) {
-    prv_synth_minute(5, 0x41, false /*definitely_not_worn*/, false /*sleep_intent_hint*/);
+    prv_synth_minute(5, 0x41, false /*definitely_not_worn*/, false /*definitely_worn*/,
+                     false /*sleep_intent_hint*/);
   }
   cl_assert(!(s_synth_diagnostic_flags & KAlgSleepDiagnosticFlag_ScoreValid));
 
   const time_t score_update_utc = s_synth_now;
-  prv_synth_minute(5, 0x41, true /*definitely_not_worn*/, false /*sleep_intent_hint*/);
+  prv_synth_minute(5, 0x41, true /*definitely_not_worn*/, false /*definitely_worn*/,
+                   false /*sleep_intent_hint*/);
   KAlgSleepDiagnostics diagnostics;
   kalg_get_sleep_diagnostics(s_kalg_state, &diagnostics);
   cl_assert(diagnostics.flags & KAlgSleepDiagnosticFlag_ScoreValid);
@@ -2261,7 +2265,14 @@ static void prv_synth_sleep(int minutes, bool definitely_not_worn, bool sleep_in
   static const uint8_t k_orientations[] = {0x41, 0x52, 0x63, 0x74};
   for (int i = 0; i < minutes; i++) {
     prv_synth_minute(5, k_orientations[(s_synth_now / (17 * SECONDS_PER_MINUTE)) % 4],
-                     definitely_not_worn, sleep_intent_hint);
+                     definitely_not_worn, false /*definitely_worn*/, sleep_intent_hint);
+  }
+}
+
+static void prv_synth_worn_sleep(int minutes) {
+  for (int i = 0; i < minutes; i++) {
+    prv_synth_minute(0, 0x61, false /*definitely_not_worn*/, true /*definitely_worn*/,
+                     false /*sleep_intent_hint*/);
   }
 }
 
@@ -2269,13 +2280,14 @@ static void prv_synth_motion(int minutes) {
   static const uint8_t k_orientations[] = {0x41, 0x62, 0x73, 0x54};
   for (int i = 0; i < minutes; i++) {
     prv_synth_minute(4000, k_orientations[i % 4], false /*definitely_not_worn*/,
-                     false /*sleep_intent_hint*/);
+                     false /*definitely_worn*/, false /*sleep_intent_hint*/);
   }
 }
 
 static void prv_synth_table(int minutes, bool sleep_intent_hint) {
   for (int i = 0; i < minutes; i++) {
-    prv_synth_minute(0, 0x05, true /*definitely_not_worn*/, sleep_intent_hint);
+    prv_synth_minute(0, 0x05, true /*definitely_not_worn*/, false /*definitely_worn*/,
+                     sleep_intent_hint);
   }
 }
 
@@ -2361,6 +2373,69 @@ void test_kraepelin_algorithm__short_cycle_sleep_intent_hint(void) {
   cl_assert_equal_i(prv_synth_container_count(), 0);
   cl_assert(s_synth_diagnostic_flags & KAlgSleepDiagnosticFlag_SessionRejected);
   cl_assert(s_synth_diagnostic_flags & KAlgSleepDiagnosticFlag_RejectedTooShort);
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__short_cycle_with_worn_evidence(void) {
+  static const struct {
+    uint16_t vmc;
+    uint8_t orientation;
+  } nap_samples[] = {
+      {9988, 67}, {9000, 97},  {21, 97},    {0, 97},     {0, 97},     {0, 97},
+      {0, 97},    {0, 97},     {0, 97},     {0, 97},     {0, 97},     {0, 97},
+      {0, 97},    {0, 97},     {5295, 107}, {6923, 103}, {4983, 106}, {1171, 91},
+      {7008, 97}, {2215, 101}, {1724, 86},  {724, 116},  {2560, 116},
+  };
+
+  prv_synth_start();
+  prv_synth_motion(20);
+  for (size_t i = 0; i < ARRAY_LENGTH(nap_samples); i++) {
+    prv_synth_minute(nap_samples[i].vmc, nap_samples[i].orientation, false /*definitely_not_worn*/,
+                     i <= 6 /*definitely_worn*/, false /*sleep_intent_hint*/);
+  }
+
+  cl_assert_equal_i(prv_synth_container_count(), 1);
+  cl_assert(prv_synth_has_short_container());
+  cl_assert(s_synth_diagnostic_flags & KAlgSleepDiagnosticFlag_SessionAccepted);
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__off_wrist_overrides_worn_short_cycle(void) {
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_worn_sleep(25);
+  prv_synth_table(3, false /*sleep_intent_hint*/);
+  prv_synth_worn_sleep(25);
+  prv_synth_motion(20);
+
+  cl_assert_equal_i(prv_synth_container_count(), 0);
+  cl_assert(s_synth_diagnostic_flags & KAlgSleepDiagnosticFlag_SessionRejected);
+  cl_assert(s_synth_diagnostic_flags & KAlgSleepDiagnosticFlag_RejectedNotWorn);
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__off_wrist_awake_tail_does_not_reject_short_cycle(void) {
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_worn_sleep(25);
+  prv_synth_table(15, false /*sleep_intent_hint*/);
+  prv_synth_motion(20);
+
+  cl_assert_equal_i(prv_synth_container_count(), 1);
+  cl_assert(prv_synth_has_short_container());
+  cl_assert(s_synth_diagnostic_flags & KAlgSleepDiagnosticFlag_SessionAccepted);
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__long_sleep_continues_after_bed_movement(void) {
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_sleep(75, false, false);
+  prv_synth_motion(15);
+  prv_synth_sleep(75, false, false);
+  prv_synth_motion(20);
+
+  cl_assert_equal_i(prv_synth_container_count(), 2);
   prv_synth_end();
 }
 

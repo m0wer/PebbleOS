@@ -238,6 +238,9 @@ bool activity_metrics_prv_is_hrm_offwrist(time_t now_utc) {
   return s_hrm_offwrist;
 }
 
+bool activity_metrics_prv_is_hrm_worn(time_t now_utc) {
+  return false;
+}
 
 // =============================================================================================
 // Algorithm stubs
@@ -264,9 +267,9 @@ void kalg_minute_stats(KAlgState *state, uint16_t *vmc, uint8_t *orientation, bo
 void kalg_set_weight(KAlgState *state, uint32_t grams) {}
 
 void kalg_activities_update(KAlgState *state, time_t utc_now, uint16_t steps, uint16_t vmc,
-                            uint8_t orientation, bool definitely_not_worn, bool sleep_intent_hint,
-                            uint32_t resting_calories, uint32_t active_calories,
-                            uint32_t distance_mm, bool shutting_down,
+                            uint8_t orientation, bool definitely_not_worn, bool definitely_worn,
+                            bool sleep_intent_hint, uint32_t resting_calories,
+                            uint32_t active_calories, uint32_t distance_mm, bool shutting_down,
                             KAlgActivitySessionCallback sessions_cb, void *context) {
   s_kalg_sleep_diagnostics = (KAlgSleepDiagnostics) { };
   if (s_emit_sleep_diagnostics && !shutting_down) {

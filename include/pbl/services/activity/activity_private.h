@@ -526,7 +526,7 @@ void activity_metrics_prv_reset_hr_stats(void);
 void activity_metrics_prv_add_median_hr_sample(PebbleHRMEvent *hrm_event, time_t now_utc,
                                                time_t now_uptime);
 
-//! Record the worn status reported by the HRM. Called once per BPM event.
+//! Record a decisive worn status reported by the HRM.
 //! @param[in] now_utc current UTC time
 //! @param[in] is_offwrist true if the event's HRMQuality was HRMQuality_OffWrist
 void activity_metrics_prv_set_hrm_worn_status(time_t now_utc, bool is_offwrist);
@@ -535,6 +535,11 @@ void activity_metrics_prv_set_hrm_worn_status(time_t now_utc, bool is_offwrist);
 //! event must have been HRMQuality_OffWrist and must have arrived within the last
 //! ACTIVITY_HRM_OFFWRIST_STALE_SEC seconds, otherwise this returns false.
 bool activity_metrics_prv_is_hrm_offwrist(time_t now_utc);
+
+//! Returns true if the HRM has recently produced a valid on-wrist reading. The reading must
+//! have acceptable or better quality and must have arrived within the last
+//! ACTIVITY_HRM_OFFWRIST_STALE_SEC seconds, otherwise this returns false.
+bool activity_metrics_prv_is_hrm_worn(time_t now_utc);
 
 //! Returns the number of steps the user has taken so far today (since midnight)
 uint32_t activity_metrics_prv_get_steps(void);
