@@ -69,6 +69,9 @@ static uint8_t s_alg_next_orientation;
 static uint8_t s_alg_next_light;
 static bool s_alg_next_plugged_in;
 static bool s_dnd_active;
+static bool s_hrm_offwrist;
+static bool s_emit_sleep_diagnostics;
+static KAlgSleepDiagnostics s_kalg_sleep_diagnostics;
 
 static struct tm s_start_time_tm = {.tm_hour = 17, .tm_mday = 1, .tm_mon = 0, .tm_year = 115};
 
@@ -232,7 +235,7 @@ void activity_metrics_prv_set_hrm_worn_status(time_t now_utc, bool is_offwrist) 
 }
 
 bool activity_metrics_prv_is_hrm_offwrist(time_t now_utc) {
-  return false;
+  return s_hrm_offwrist;
 }
 
 
@@ -264,7 +267,21 @@ void kalg_activities_update(KAlgState *state, time_t utc_now, uint16_t steps, ui
                             uint8_t orientation, bool definitely_not_worn, bool sleep_intent_hint,
                             uint32_t resting_calories, uint32_t active_calories,
                             uint32_t distance_mm, bool shutting_down,
-                            KAlgActivitySessionCallback sessions_cb, void *context) {}
+                            KAlgActivitySessionCallback sessions_cb, void *context) {
+  s_kalg_sleep_diagnostics = (KAlgSleepDiagnostics) { };
+  if (s_emit_sleep_diagnostics && !shutting_down) {
+    s_kalg_sleep_diagnostics = (KAlgSleepDiagnostics) {
+      .sample_utc = utc_now - (5 * SECONDS_PER_MINUTE),
+      .score = utc_now,
+      .flags = KAlgSleepDiagnosticFlag_ScoreValid |
+               (definitely_not_worn ? KAlgSleepDiagnosticFlag_DefinitelyNotWornInput : 0),
+    };
+  }
+}
+
+void kalg_get_sleep_diagnostics(const KAlgState *state, KAlgSleepDiagnostics *diagnostics) {
+  *diagnostics = s_kalg_sleep_diagnostics;
+}
 
 bool do_not_disturb_is_active(void) {
   return s_dnd_active;
@@ -406,7 +423,13 @@ void test_activity_algorithm_kraepelin__initialize(void) {
   s_activity_next_active_calories = 0;
   s_activity_next_heart_rate_bpm = 0;
   s_activity_next_heart_rate_zone = 0;
+  s_dls_created = false;
+  s_capture_dls_records = true;
+  s_num_dls_records = 0;
   s_dnd_active = false;
+  s_hrm_offwrist = false;
+  s_emit_sleep_diagnostics = false;
+  s_kalg_sleep_diagnostics = (KAlgSleepDiagnostics) { };
   s_kalg_sleep_start_utc = 0;
   s_kalg_sleep_m = 0;
   activity_algorithm_init(&s_sample_rate);
@@ -423,7 +446,7 @@ void test_activity_algorithm_kraepelin__cleanup(void) {
 // Test to make sure that the minute data gets sent to data logging correctly
 void test_activity_algorithm_kraepelin__data_logging_test(void) {
   const int k_num_records = 2;
-  const int num_minutes = k_num_records * ALG_MINUTES_PER_DLS_RECORD;
+  const int num_minutes = (k_num_records * ALG_MINUTES_PER_DLS_RECORD) + 4;
 
   // The test data
   AlgMinuteDLSSample minute_data[num_minutes];
@@ -436,9 +459,9 @@ void test_activity_algorithm_kraepelin__data_logging_test(void) {
   // Make sure the correct data got saved to data logging
   cl_assert_equal_i(s_num_dls_records, 2);
   for (int j = 0; j < k_num_records; j++) {
-    cl_assert_equal_i(s_dls_records[j].hdr.version, 14);
+    cl_assert_equal_i(s_dls_records[j].hdr.version, 15);
     cl_assert_equal_i(s_dls_records[j].hdr.version, ALG_DLS_MINUTES_RECORD_VERSION);
-    cl_assert_equal_i(s_dls_records[j].hdr.sample_size, 17);
+    cl_assert_equal_i(s_dls_records[j].hdr.sample_size, 23);
     cl_assert_equal_i(s_dls_records[j].hdr.sample_size, sizeof(AlgMinuteDLSSample));
     for (int i = 0; i < ALG_MINUTES_PER_DLS_RECORD; i++) {
       cl_assert_equal_m(&s_dls_records[j].samples[i],
@@ -446,6 +469,56 @@ void test_activity_algorithm_kraepelin__data_logging_test(void) {
       cl_assert_equal_i(s_dls_records[j].samples[i].sleep_intent_hint,
                         minute_data[(j * ALG_MINUTES_PER_DLS_RECORD) + i].sleep_intent_hint);
     }
+  }
+}
+
+// ---------------------------------------------------------------------------------------
+void test_activity_algorithm_kraepelin__sleep_diagnostics_align_to_scored_minute(void) {
+  const int num_minutes = ALG_MINUTES_PER_DLS_RECORD + 4;
+  AlgMinuteDLSSample minute_data[num_minutes];
+  prv_create_test_data(num_minutes, minute_data);
+  for (int i = 0; i < num_minutes; i++) {
+    minute_data[i].base.plugged_in = false;
+  }
+
+  const time_t start_utc = rtc_get_time();
+  s_emit_sleep_diagnostics = true;
+  prv_feed_minute_data(4, minute_data, false /*simulate_bg_delays*/);
+
+  // The first scored record was captured while HRM said worn, then classified when HRM said
+  // off-wrist. Input flags must explain the classification decision, not the older sensor state.
+  s_hrm_offwrist = true;
+  prv_feed_minute_data(num_minutes - 4, &minute_data[4], false /*simulate_bg_delays*/);
+
+  cl_assert_equal_i(s_num_dls_records, 1);
+  for (int i = 0; i < ALG_MINUTES_PER_DLS_RECORD; i++) {
+    const AlgMinuteDLSSample *sample = &s_dls_records[0].samples[i];
+    cl_assert_equal_i(sample->sleep_score, start_utc + ((i + 5) * SECONDS_PER_MINUTE));
+    cl_assert_equal_i(sample->sleep_flags, KAlgSleepDiagnosticFlag_ScoreValid |
+                      KAlgSleepDiagnosticFlag_DefinitelyNotWornInput |
+                      KAlgSleepDiagnosticFlag_HrmOffWristInput);
+  }
+}
+
+// ---------------------------------------------------------------------------------------
+void test_activity_algorithm_kraepelin__force_send_retains_sleep_diagnostic_lag(void) {
+  AlgMinuteDLSSample minute_data[ALG_MINUTES_PER_DLS_RECORD + 4];
+  prv_create_test_data(ARRAY_LENGTH(minute_data), minute_data);
+  s_emit_sleep_diagnostics = true;
+
+  prv_feed_minute_data(ALG_MINUTES_PER_DLS_RECORD, minute_data, false /*simulate_bg_delays*/);
+  cl_assert_equal_i(s_num_dls_records, 0);
+
+  activity_algorithm_send_minutes();
+  cl_assert_equal_i(s_num_dls_records, 1);
+  cl_assert_equal_i(s_dls_records[0].hdr.num_samples, ALG_MINUTES_PER_DLS_RECORD - 4);
+
+  prv_feed_minute_data(4, &minute_data[ALG_MINUTES_PER_DLS_RECORD], false /*simulate_bg_delays*/);
+  activity_algorithm_send_minutes();
+  cl_assert_equal_i(s_num_dls_records, 2);
+  cl_assert_equal_i(s_dls_records[1].hdr.num_samples, 4);
+  for (int i = 0; i < s_dls_records[1].hdr.num_samples; i++) {
+    cl_assert(s_dls_records[1].samples[i].sleep_flags & KAlgSleepDiagnosticFlag_ScoreValid);
   }
 }
 
