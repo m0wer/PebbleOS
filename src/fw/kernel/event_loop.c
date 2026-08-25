@@ -29,7 +29,9 @@
 #include "process_management/app_run_state.h"
 #include "process_management/process_manager.h"
 #include "process_management/worker_manager.h"
+#if !defined(CONFIG_RECOVERY_FW) && !defined(CONFIG_SHELL_SDK)
 #include "popups/notifications/notification_window.h"
+#endif
 #include "pbl/services/analytics/analytics.h"
 #include "pbl/services/battery/battery_state.h"
 #include "pbl/services/battery/battery_monitor.h"
@@ -72,6 +74,7 @@
 static const uint32_t FORCE_QUIT_HOLD_MS = 1500;
 static int s_back_hold_timer = TIMER_INVALID_ID;
 
+#if !defined(CONFIG_RECOVERY_FW) && !defined(CONFIG_SHELL_SDK)
 static const uint32_t DOUBLE_FLICK_DISMISS_WINDOW_MS = 1500;
 static bool s_double_flick_dismiss_pending = false;
 static RtcTicks s_double_flick_dismiss_first_ticks = 0;
@@ -81,6 +84,7 @@ static void prv_clear_double_flick_dismiss_pending(void) {
   s_double_flick_dismiss_pending = false;
   s_double_flick_dismiss_notification_id = UUID_INVALID;
 }
+#endif
 
 #ifndef CONFIG_SHELL_SDK
 static const uint32_t BACK_QUICKPRESS_INTERVAL_TICKS = 300;
@@ -283,6 +287,7 @@ static NOINLINE void prv_minimal_event_handler(PebbleEvent* e) {
           light_enable_interaction();
         }
       }
+#if !defined(CONFIG_RECOVERY_FW) && !defined(CONFIG_SHELL_SDK)
       if (!shell_prefs_get_double_flick_dismiss_notification_enabled()) {
         prv_clear_double_flick_dismiss_pending();
         return;
@@ -307,6 +312,7 @@ static NOINLINE void prv_minimal_event_handler(PebbleEvent* e) {
         s_double_flick_dismiss_first_ticks = now;
         s_double_flick_dismiss_notification_id = notification_id;
       }
+#endif
       return;
 
 #ifdef CONFIG_TOUCH
