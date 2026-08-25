@@ -8,6 +8,7 @@
 #include "apps/system/settings/notifications_private.h"
 #include "popups/notifications/notification_window.h"
 #include "popups/notifications/notification_window_private.h"
+#include "popups/notifications/notifications_presented_list.h"
 #include "resource/timeline_resource_ids.auto.h"
 #include "pbl/services/timeline/notification_layout.h"
 #include "pbl/util/trig.h"
@@ -75,9 +76,13 @@
 #include "stubs_syscalls.h"
 #include "stubs_task_watchdog.h"
 #include "stubs_time.h"
+#define timeline_invoke_action prv_stub_timeline_invoke_action
 #include "stubs_timeline.h"
+#undef timeline_invoke_action
 #include "stubs_timeline_actions.h"
+#define timeline_item_find_dismiss_action prv_stub_timeline_item_find_dismiss_action
 #include "stubs_timeline_item.h"
+#undef timeline_item_find_dismiss_action
 #include "stubs_timeline_layer.h"
 #include "stubs_timeline_peek.h"
 #include "stubs_vibes.h"
@@ -179,6 +184,19 @@ typedef struct NotificationWindowTestData {
 } NotificationWindowTestData;
 
 static NotificationWindowTestData s_test_data;
+static TimelineItemAction *s_dismiss_action;
+static const TimelineItem *s_invoked_item;
+static const TimelineItemAction *s_invoked_action;
+
+TimelineItemAction *timeline_item_find_dismiss_action(const TimelineItem *item) {
+  return s_dismiss_action;
+}
+
+void timeline_invoke_action(const TimelineItem *item, const TimelineItemAction *action,
+                            const AttributeList *attributes) {
+  s_invoked_item = item;
+  s_invoked_action = action;
+}
 
 void clock_get_since_time(char *buffer, int buf_size, time_t timestamp) {
   if (buffer && s_test_data.timestamp) {
@@ -332,7 +350,10 @@ void test_notification_window__initialize(void) {
   load_system_resources_fixture();
 
   attribute_list_destroy_list(&s_test_data.statics.attr_list);
-  s_test_data = (NotificationWindowTestData) {};
+  s_test_data = (NotificationWindowTestData){};
+  s_dismiss_action = NULL;
+  s_invoked_item = NULL;
+  s_invoked_action = NULL;
   s_notification_status_bar_style = NotificationStatusBarStyle_Default;
   // Reset the notification window so each test gets a fresh prv_init_notification_window
   // call with the correct status-bar style.  Without this, s_in_use=true from a previous
@@ -341,8 +362,7 @@ void test_notification_window__initialize(void) {
   s_in_use = false;
 }
 
-void test_notification_window__cleanup(void) {
-}
+void test_notification_window__cleanup(void) {}
 
 // Helpers
 //////////////////////
@@ -499,16 +519,47 @@ void test_notification_window__body_icon(void) {
 
 void test_notification_window__big_bold(void) {
   s_notification_status_bar_style = NotificationStatusBarStyle_LargeBold;
-  s_test_data = (NotificationWindowTestData) {
-    .icon_id = TIMELINE_RESOURCE_NOTIFICATION_FACEBOOK_MESSENGER,
-    .title = "Henry Levak",
-    .body = "Nu, Shara. Where are my designs, blat?",
-    .show_notification_timestamp = true,
-    .timestamp = "Just now",
-    .background_color = GColorPictonBlue,
+  s_test_data = (NotificationWindowTestData){
+      .icon_id = TIMELINE_RESOURCE_NOTIFICATION_FACEBOOK_MESSENGER,
+      .title = "Henry Levak",
+      .body = "Nu, Shara. Where are my designs, blat?",
+      .show_notification_timestamp = true,
+      .timestamp = "Just now",
+      .background_color = GColorPictonBlue,
   };
   const unsigned int num_down_scrolls =
       PBL_IF_RECT_ELSE((PreferredContentSizeDefault < PreferredContentSizeLarge) ? 1 : 0, 0);
   prv_prepare_canvas_and_render_notification_windows(num_down_scrolls);
   FAKE_GRAPHICS_CONTEXT_CHECK_DEST_BITMAP_FILE();
+}
+
+void test_notification_window__dismiss_current_modal_notification_requires_active_dismiss_action(
+    void) {
+  cl_assert_equal_b(false, notification_window_dismiss_current_modal_notification());
+  cl_assert_equal_b(false, notification_window_current_modal_notification_is_dismissible());
+
+  notification_window_init(false /* is_modal */);
+  s_notification_window_data.is_modal = true;
+  cl_assert_equal_b(false, notification_window_dismiss_current_modal_notification());
+
+  Uuid id = UUID_INVALID;
+  notifications_presented_list_add(&id, NotificationMobile);
+  notifications_presented_list_set_current(&id);
+  window_set_on_screen(&s_notification_window_data.window, true, true);
+  swap_layer_reload_data(&s_notification_window_data.swap_layer);
+
+  cl_assert_equal_b(false, notification_window_dismiss_current_modal_notification());
+
+  TimelineItemAction dismiss_action = {};
+  s_dismiss_action = &dismiss_action;
+  cl_assert_equal_b(true, notification_window_current_modal_notification_is_dismissible());
+  const Uuid expected_id = UuidMake(1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+  s_test_data.statics.timeline_item.header.id = expected_id;
+  Uuid actual_id = UUID_INVALID;
+  cl_assert_equal_b(true,
+                    notification_window_get_current_modal_dismissible_notification_id(&actual_id));
+  cl_assert_equal_b(true, uuid_equal(&expected_id, &actual_id));
+  cl_assert_equal_b(true, notification_window_dismiss_current_modal_notification());
+  cl_assert_equal_p(s_invoked_item, &s_test_data.statics.timeline_item);
+  cl_assert_equal_p(s_invoked_action, &dismiss_action);
 }

@@ -17,6 +17,13 @@ void notification_window_show(void);
 
 bool notification_window_is_modal(void);
 
+// Invokes the current modal notification's dismiss action, if it is available.
+bool notification_window_dismiss_current_modal_notification(void);
+
+bool notification_window_current_modal_notification_is_dismissible(void);
+
+bool notification_window_get_current_modal_dismissible_notification_id(Uuid *id_out);
+
 void notification_window_handle_notification(PebbleSysNotificationEvent *e);
 
 void notification_window_handle_reminder(PebbleReminderEvent *e);
