@@ -68,14 +68,9 @@ static uint16_t s_alg_next_vmc;
 static uint8_t s_alg_next_orientation;
 static uint8_t s_alg_next_light;
 static bool s_alg_next_plugged_in;
+static bool s_dnd_active;
 
-static struct tm s_start_time_tm = {
-  .tm_hour = 17,
-  .tm_mday = 1,
-  .tm_mon = 0,
-  .tm_year = 115
-};
-
+static struct tm s_start_time_tm = {.tm_hour = 17, .tm_mday = 1, .tm_mon = 0, .tm_year = 115};
 
 // ============================================================================================
 // Misc stubs
@@ -265,14 +260,16 @@ void kalg_minute_stats(KAlgState *state, uint16_t *vmc, uint8_t *orientation, bo
   *still = false;
 }
 
-void kalg_set_weight(KAlgState *state, uint32_t grams) {
-}
+void kalg_set_weight(KAlgState *state, uint32_t grams) {}
 
 void kalg_activities_update(KAlgState *state, time_t utc_now, uint16_t steps, uint16_t vmc,
-                            uint8_t orientation, bool definitely_not_worn,
-                            uint32_t resting_calories,
-                            uint32_t active_calories, uint32_t distance_mm, bool shutting_down,
-                            KAlgActivitySessionCallback sessions_cb, void *context) {
+                            uint8_t orientation, bool definitely_not_worn, bool sleep_intent_hint,
+                            uint32_t resting_calories, uint32_t active_calories,
+                            uint32_t distance_mm, bool shutting_down,
+                            KAlgActivitySessionCallback sessions_cb, void *context) {}
+
+bool do_not_disturb_is_active(void) {
+  return s_dnd_active;
 }
 
 time_t kalg_activity_last_processed_time(KAlgState *state, KAlgActivityType activity) {
@@ -343,14 +340,14 @@ static void prv_create_test_data(uint32_t num_minutes, AlgMinuteDLSSample *minut
     minute_data[i].active_calories = next_active_calories++;
     minute_data[i].resting_calories = next_resting_calories++;
     minute_data[i].distance_cm = next_distance_cm++;
-    minute_data[i].base.active = (minute_data[i].base.steps >= ACTIVITY_ACTIVE_MINUTE_MIN_STEPS)
-                                 ? 1 : 0;
+    minute_data[i].base.active =
+        (minute_data[i].base.steps >= ACTIVITY_ACTIVE_MINUTE_MIN_STEPS) ? 1 : 0;
     minute_data[i].heart_rate_bpm = next_heart_rate_bpm++;
     minute_data[i].heart_rate_total_weight_x100 = next_heart_rate_heart_rate_total_weight_x100++;
     minute_data[i].heart_rate_zone = next_heart_rate_zone++;
+    minute_data[i].sleep_intent_hint = i % 2;
   }
 }
-
 
 // --------------------------------------------------------------------------------------------
 // Feed in sleep data
@@ -377,6 +374,9 @@ static void prv_feed_minute_data(uint32_t num_minutes, AlgMinuteDLSSample *minut
     s_alg_next_orientation = minute_data[i].base.orientation;
     s_alg_next_light = minute_data[i].base.light;
     s_alg_next_plugged_in = minute_data[i].base.plugged_in;
+    if ((i + 1) < num_minutes) {
+      s_dnd_active = minute_data[i + 1].sleep_intent_hint;
+    }
     s_activity_next_distance_mm += minute_data[i].distance_cm * 10;
     s_activity_next_resting_calories += minute_data[i].resting_calories;
     s_activity_next_active_calories += minute_data[i].active_calories;
@@ -408,11 +408,11 @@ void test_activity_algorithm_kraepelin__initialize(void) {
   s_activity_next_active_calories = 0;
   s_activity_next_heart_rate_bpm = 0;
   s_activity_next_heart_rate_zone = 0;
+  s_dnd_active = false;
   s_kalg_sleep_start_utc = 0;
   s_kalg_sleep_m = 0;
   activity_algorithm_init(&s_sample_rate);
 }
-
 
 // ---------------------------------------------------------------------------------------
 void test_activity_algorithm_kraepelin__cleanup(void) {
@@ -438,15 +438,35 @@ void test_activity_algorithm_kraepelin__data_logging_test(void) {
   // Make sure the correct data got saved to data logging
   cl_assert_equal_i(s_num_dls_records, 2);
   for (int j = 0; j < k_num_records; j++) {
+    cl_assert_equal_i(s_dls_records[j].hdr.version, 14);
     cl_assert_equal_i(s_dls_records[j].hdr.version, ALG_DLS_MINUTES_RECORD_VERSION);
+    cl_assert_equal_i(s_dls_records[j].hdr.sample_size, 17);
+    cl_assert_equal_i(s_dls_records[j].hdr.sample_size, sizeof(AlgMinuteDLSSample));
     for (int i = 0; i < ALG_MINUTES_PER_DLS_RECORD; i++) {
       cl_assert_equal_m(&s_dls_records[j].samples[i],
-                        &minute_data[(j * ALG_MINUTES_PER_DLS_RECORD) + i],
-                        sizeof(minute_data[i]));
+                        &minute_data[(j * ALG_MINUTES_PER_DLS_RECORD) + i], sizeof(minute_data[i]));
+      cl_assert_equal_i(s_dls_records[j].samples[i].sleep_intent_hint,
+                        minute_data[(j * ALG_MINUTES_PER_DLS_RECORD) + i].sleep_intent_hint);
     }
   }
 }
 
+// ---------------------------------------------------------------------------------------
+void test_activity_algorithm_kraepelin__sleep_intent_hint_tracks_completed_interval(void) {
+  activity_algorithm_deinit();
+  s_dnd_active = true;
+  activity_algorithm_init(&s_sample_rate);
+
+  AlgMinuteRecord record = {};
+  fake_rtc_increment_time(SECONDS_PER_MINUTE);
+  s_dnd_active = false;
+  activity_algorithm_minute_handler(rtc_get_time(), &record);
+  cl_assert_equal_b(true, record.data.sleep_intent_hint);
+
+  fake_rtc_increment_time(SECONDS_PER_MINUTE);
+  activity_algorithm_minute_handler(rtc_get_time(), &record);
+  cl_assert_equal_b(false, record.data.sleep_intent_hint);
+}
 
 // ------------------------------------------------------------------------------------
 static void prv_assert_minute_data(HealthMinuteData *actual, AlgMinuteDLSSample *expected) {
@@ -953,5 +973,3 @@ void test_activity_algorithm_kraepelin__minute_data_steps_during_sleep(void) {
     cl_assert_equal_i(retrieve[i].heart_rate_bpm, minute_data[i].heart_rate_bpm);
   }
 }
-
-

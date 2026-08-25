@@ -25,6 +25,7 @@
 
 #include "pbl/services/activity/kraepelin/activity_algorithm_kraepelin.h"
 #include "pbl/services/activity/kraepelin/kraepelin_algorithm.h"
+#include "pbl/services/notifications/do_not_disturb.h"
 
 #include "pbl/services/light.h"
 
@@ -54,10 +55,11 @@ typedef struct {
   // Last computed step rate information
   uint8_t rate_steps;
   uint16_t rate_elapsed_ms;
-  time_t  rate_computed_time_s;
+  time_t rate_computed_time_s;
 
   // Minute data
   uint16_t minute_steps;
+  bool sleep_intent_hint;
 
   // The data logging session and record we use to send minute data to the phone
   DataLoggingSession *dls_session;
@@ -817,9 +819,10 @@ bool activity_algorithm_init(AccelSamplingRate *sampling_rate) {
   }
 
   // Init globals
-  *s_alg_state = (AlgState) {
-    .mutex = mutex_create_recursive(),
-    .k_state = k_state,
+  *s_alg_state = (AlgState){
+      .mutex = mutex_create_recursive(),
+      .k_state = k_state,
+      .sleep_intent_hint = do_not_disturb_is_active(),
   };
   shared_circular_buffer_init(&s_alg_state->minute_data_cbuf,
                               (uint8_t *)s_alg_state->minute_data_storage,
@@ -975,6 +978,11 @@ static void prv_activity_update_states(time_t utc_sec, AlgMinuteRecord *record_o
   record_out->utc_sec = utc_sec - SECONDS_PER_MINUTE;  // this data is for the previous minute
   AlgMinuteDLSSample *m_rec = &record_out->data;
   uint32_t minute_distance_mm = prv_fill_minute_record(utc_sec, m_rec);
+  const bool sleep_intent_hint = s_alg_state->sleep_intent_hint;
+  m_rec->sleep_intent_hint = sleep_intent_hint;
+
+  // Attribute the cached state to the completed interval before sampling the new one.
+  s_alg_state->sleep_intent_hint = do_not_disturb_is_active();
 
   prv_reset_state_minute_handler(m_rec);
 
@@ -986,16 +994,17 @@ static void prv_activity_update_states(time_t utc_sec, AlgMinuteRecord *record_o
   const bool hrm_offwrist = activity_metrics_prv_is_hrm_offwrist(utc_sec);
   const bool not_worn = m_rec->base.plugged_in || hrm_offwrist;
 
-  ACTIVITY_LOG_DEBUG("minute handler: steps: %"PRIu8", orientation: 0x%"PRIx8", vmc: %"PRIu16", "
-                     "light: %"PRIu8", plugged_in: %d, hrm_offwrist: %d",
-                     m_rec->base.steps, m_rec->base.orientation, m_rec->base.vmc,
-                     m_rec->base.light, (int) m_rec->base.plugged_in, (int) hrm_offwrist);
+  ACTIVITY_LOG_DEBUG("minute handler: steps: %" PRIu8 ", orientation: 0x%" PRIx8 ", vmc: %" PRIu16
+                     ", "
+                     "light: %" PRIu8 ", plugged_in: %d, hrm_offwrist: %d",
+                     m_rec->base.steps, m_rec->base.orientation, m_rec->base.vmc, m_rec->base.light,
+                     (int)m_rec->base.plugged_in, (int)hrm_offwrist);
 
   // Pass the minute data onto the activity detection logic
   kalg_activities_update(s_alg_state->k_state, utc_sec, m_rec->base.steps, m_rec->base.vmc,
-                         m_rec->base.orientation, not_worn, m_rec->resting_calories,
-                         m_rec->active_calories, minute_distance_mm, shutting_down,
-                         prv_create_activity_session_cb, NULL);
+                         m_rec->base.orientation, not_worn, sleep_intent_hint,
+                         m_rec->resting_calories, m_rec->active_calories, minute_distance_mm,
+                         shutting_down, prv_create_activity_session_cb, NULL);
 }
 
 // ------------------------------------------------------------------------------------
