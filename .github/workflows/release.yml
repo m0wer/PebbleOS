@@ -7,6 +7,7 @@ on:
 
 jobs:
   build-prf:
+    if: github.repository == 'coredevices/PebbleOS'
     runs-on: ubuntu-24.04
 
     container:
@@ -207,6 +208,7 @@ jobs:
           path: artifacts
 
   build-qemu:
+    if: github.repository == 'coredevices/PebbleOS'
     runs-on: ubuntu-24.04
 
     container:
@@ -271,9 +273,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     needs:
-      - build-prf
       - build-firmware
-      - build-qemu
     permissions:
       contents: write
 
@@ -299,10 +299,27 @@ jobs:
               --output "artifacts-merged/normal_${board}_${{ github.ref_name }}.pbz"
           done
 
+      - name: Prepare installable firmware
+        run: |
+          set -euo pipefail
+          tag='${{ github.ref_name }}'
+          mkdir artifacts-release
+          cp "artifacts-asterix/normal_asterix_${tag}.pbz" \
+            artifacts-release/PebbleOS-asterix.pbz
+          for board in obelix_dvt obelix_pvt getafix_evt getafix_dvt getafix_dvt2; do
+            cp "artifacts-merged/normal_${board}_${tag}.pbz" \
+              "artifacts-release/PebbleOS-${board}.pbz"
+          done
+          cd artifacts-release
+          sha256sum -- *.pbz > SHA256SUMS
+
       - name: Create release
         uses: softprops/action-gh-release@v3.0.2
         with:
-          files: artifacts-*/*
+          name: PebbleOS ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: artifacts-release/*
 
       - name: Upload OTA artifacts to R2
         if: ${{ github.repository == 'coredevices/PebbleOS' }}

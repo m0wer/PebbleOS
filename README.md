@@ -5,6 +5,8 @@ and carries a small patch stack for personal builds. Upstream documentation rema
 reference for [building](https://pebbleos-core.readthedocs.io/en/latest/development/getting_started.html)
 and [contributing](https://github.com/coredevices/PebbleOS/blob/main/CONTRIBUTING.md).
 
+**[Download the latest firmware release](https://github.com/m0wer/PebbleOS/releases/latest)**
+
 ## Changes
 
 - Retain fragmented sleep periods and Quiet Time context during sleep classification
@@ -21,13 +23,19 @@ Branches named `publish/*` contain focused changes based directly on the upstrea
 
 ## Install
 
-Open the latest successful **Build Firmware** workflow run and download the release artifact for
-your watch. `qa-firmware-obelix_pvt` and `qa-firmware-getafix_dvt2` contain dual-slot release PBZ
-files suitable for Bluetooth sideloading on those exact hardware revisions. Do not install a PBZ
-built for a different board.
+Download the PBZ for your exact watch and hardware revision from the
+[latest release](https://github.com/m0wer/PebbleOS/releases/latest):
 
-Extract the artifact and transfer its `.pbz` file to the phone paired with the watch. In the Pebble
-app, enable **Settings > Show debug options**, open the watch in **Devices**, then choose
+- Pebble 2 Duo: `PebbleOS-asterix.pbz`
+- Pebble Time 2: `PebbleOS-obelix_dvt.pbz` or `PebbleOS-obelix_pvt.pbz`
+- Pebble Round 2: `PebbleOS-getafix_evt.pbz`, `PebbleOS-getafix_dvt.pbz`, or
+  `PebbleOS-getafix_dvt2.pbz`
+
+Do not install a PBZ built for a different product or hardware revision. Release assets are
+production builds; `SHA256SUMS` contains their checksums.
+
+Transfer the downloaded `.pbz` file to the phone paired with the watch. In the Pebble app, enable
+**Settings > Show debug options**, open the watch in **Devices**, then choose
 **Firmware Update Debug > Sideload FW**. See the
 [firmware loading guide](docs/development/building_fw.md#loading-firmware-via-bluetooth) for other
 builds and ADB installation.
