@@ -1435,6 +1435,37 @@ bool notification_window_is_modal(void) {
   return s_notification_window_data.is_modal;
 }
 
+bool notification_window_current_modal_notification_is_dismissible(void) {
+  Uuid id;
+  return notification_window_get_current_modal_dismissible_notification_id(&id);
+}
+
+bool notification_window_get_current_modal_dismissible_notification_id(Uuid *id_out) {
+  NotificationWindowData *data = &s_notification_window_data;
+  if (!id_out || !s_in_use || !data->is_modal || !window_is_on_screen(&data->window)) {
+    return false;
+  }
+
+  TimelineItem *item = prv_get_current_notification(data);
+  if (!item || !timeline_item_find_dismiss_action(item)) {
+    return false;
+  }
+
+  *id_out = item->header.id;
+  return true;
+}
+
+bool notification_window_dismiss_current_modal_notification(void) {
+  if (!notification_window_current_modal_notification_is_dismissible()) {
+    return false;
+  }
+
+  TimelineItem *item = prv_get_current_notification(&s_notification_window_data);
+  TimelineItemAction *dismiss_action = timeline_item_find_dismiss_action(item);
+  timeline_invoke_action(item, dismiss_action, NULL);
+  return true;
+}
+
 void notification_window_add_notification_by_id(Uuid *id) {
   prv_notification_window_add_notification(id, NotificationMobile);
 }

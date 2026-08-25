@@ -93,6 +93,10 @@ void backlight_set_default_color(uint32_t rgb_color);
 bool backlight_is_motion_enabled(void);
 void backlight_set_motion_enabled(bool enable);
 
+// Enables dismissing the current notification popup with a double flick.
+bool shell_prefs_get_double_flick_dismiss_notification_enabled(void);
+void shell_prefs_set_double_flick_dismiss_notification_enabled(bool enable);
+
 // The backlight touch wake setting is used by the kernel event loop to decide
 // whether touch gestures wake the backlight, and if so which gesture (single
 // tap or double tap).
