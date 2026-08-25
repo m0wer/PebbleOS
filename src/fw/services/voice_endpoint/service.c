@@ -21,8 +21,20 @@ PBL_LOG_MODULE_DEFINE(service_voice_endpoint, CONFIG_SERVICE_VOICE_ENDPOINT_LOG_
 #define VOICE_CONTROL_ENDPOINT (11000)
 
 #ifdef CONFIG_MIC
+static void prv_handle_dictation_or_recording_result(bool recording_session,
+                                                      VoiceEndpointResult result,
+                                                      AudioEndpointSessionId session_id,
+                                                      bool app_initiated, Uuid *app_uuid) {
+  if (recording_session) {
+    voice_handle_recording_result(result, session_id, app_initiated, app_uuid);
+  } else {
+    voice_handle_dictation_result(result, session_id, NULL, app_initiated, app_uuid);
+  }
+}
+
 static bool prv_handle_result_common(VoiceEndpointResult result,
                                      bool app_initiated,
+                                     bool recording_session,
                                      AudioEndpointSessionId session_id,
                                      GenericAttributeList *attr_list,
                                      size_t attr_list_size,
@@ -34,22 +46,23 @@ static bool prv_handle_result_common(VoiceEndpointResult result,
   if (app_initiated && !uuid_attr) {
     PBL_LOG_WRN("No app UUID found for dictation response from app-initiated "
         "session");
-    voice_handle_dictation_result(VoiceEndpointResultFailInvalidMessage, session_id, NULL,
-                                  app_initiated, NULL);
+    prv_handle_dictation_or_recording_result(recording_session,
+        VoiceEndpointResultFailInvalidMessage, session_id, app_initiated, NULL);
     return false;
   }
 
   Uuid *app_uuid = uuid_attr ? (Uuid *)uuid_attr->data : NULL;
 
   if (result != VoiceEndpointResultSuccess) {
-    voice_handle_dictation_result(result, session_id, NULL, app_initiated, app_uuid);
+    prv_handle_dictation_or_recording_result(recording_session, result, session_id, app_initiated,
+                                             app_uuid);
     return false;
   }
 
   if (attr_list->num_attributes == 0) {
     PBL_LOG_WRN("No attributes in message");
-    voice_handle_dictation_result(VoiceEndpointResultFailInvalidMessage, session_id, NULL,
-                                  app_initiated, app_uuid);
+    prv_handle_dictation_or_recording_result(recording_session,
+        VoiceEndpointResultFailInvalidMessage, session_id, app_initiated, app_uuid);
     return false;
   }
 
@@ -60,10 +73,16 @@ static bool prv_handle_result_common(VoiceEndpointResult result,
 static void prv_handle_dictation_result(VoiceSessionResultMsg *msg, size_t size) {
   const size_t attr_list_size = size - sizeof(VoiceSessionResultMsg) + sizeof(GenericAttributeList);
   const bool app_initiated = (msg->flags.app_initiated == 1);
+  const bool recording_session = voice_is_recording_session();
   Uuid *app_uuid = NULL;
 
-  if (!prv_handle_result_common(msg->result, app_initiated, msg->session_id,
+  if (!prv_handle_result_common(msg->result, app_initiated, recording_session, msg->session_id,
                                 &msg->attr_list, attr_list_size, &app_uuid)) {
+    return;
+  }
+
+  if (recording_session) {
+    voice_handle_recording_result(msg->result, msg->session_id, app_initiated, app_uuid);
     return;
   }
 
@@ -94,7 +113,7 @@ static void prv_handle_nlp_result(VoiceSessionResultMsg *msg, size_t size) {
   const bool app_initiated = (msg->flags.app_initiated == 1);
   Uuid *app_uuid = NULL;
 
-  if (!prv_handle_result_common(msg->result, app_initiated, msg->session_id,
+  if (!prv_handle_result_common(msg->result, app_initiated, false, msg->session_id,
                                 &msg->attr_list, attr_list_size, &app_uuid)) {
     return;
   }

@@ -101,6 +101,13 @@ void voice_handle_dictation_result(VoiceEndpointResult result, AudioEndpointSess
                                    Transcription *transcription, bool app_initiated,
                                    Uuid *app_uuid);
 
+//! Return whether the active voice session is an app-owned recording session.
+bool voice_is_recording_session(void);
+
+//! Handle a recording session result received by voice control endpoint.
+void voice_handle_recording_result(VoiceEndpointResult result, AudioEndpointSessionId session_id,
+                                   bool app_initiated, Uuid *app_uuid);
+
 void voice_handle_nlp_result(VoiceEndpointResult result, AudioEndpointSessionId session_id,
                              char *reminder, time_t timestamp);
 
