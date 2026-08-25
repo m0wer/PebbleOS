@@ -12,6 +12,8 @@
   PREFS_MACRO(PREF_KEY_BACKLIGHT_COLOR, s_backlight_color)
 #endif
   PREFS_MACRO(PREF_KEY_BACKLIGHT_MOTION, s_backlight_motion_enabled)
+  PREFS_MACRO(PREF_KEY_DOUBLE_FLICK_DISMISS_NOTIFICATION,
+              s_double_flick_dismiss_notification_enabled)
   PREFS_MACRO(PREF_KEY_BACKLIGHT_TOUCH, s_backlight_touch_wake)
   PREFS_MACRO(PREF_KEY_TOUCH_ENABLED, s_touch_enabled)
   PREFS_MACRO(PREF_KEY_TOUCH_NAVIGATION_MENU, s_touch_navigation_menu_enabled)
