@@ -63,6 +63,7 @@ static const char *s_syncable_settings[] = {
   "lightTimeoutMs",
   "lightIntensity",
   "lightMotion",
+  "doubleFlickDismissNotification",
   "lightTouch",
   "lightAmbientThreshold",
 #ifdef CONFIG_DYNAMIC_BACKLIGHT
