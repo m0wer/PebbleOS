@@ -2,6 +2,9 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 
 #include <math.h>
+#include <stdint.h>
+
+#include "FreeRTOS.h"
 
 #include "board/board.h"
 #include <pbl/drivers/battery.h>
@@ -70,6 +73,9 @@ static uint64_t prv_ref_time;
 static int32_t s_last_voltage_mv;
 static int32_t s_last_temp_mc;
 static int32_t s_last_current_ua;
+static int64_t s_analytics_current_sum_ua;
+static int32_t s_analytics_current_peak_ua;
+static uint32_t s_analytics_current_sample_count;
 static uint32_t s_last_soc_cpct;
 static uint32_t s_soc_cpct_min = UINT32_MAX;
 static int32_t s_analytics_last_voltage_mv;
@@ -87,6 +93,17 @@ static uint32_t s_last_tte;
 static uint32_t s_last_ttf;
 static RtcTicks s_last_log;
 static bool s_charger_enabled;
+
+static void prv_track_current_sample(int32_t current_ua) {
+  portENTER_CRITICAL();
+  s_last_current_ua = current_ua;
+  s_analytics_current_sum_ua += current_ua;
+  if (s_analytics_current_sample_count == 0 || current_ua > s_analytics_current_peak_ua) {
+    s_analytics_current_peak_ua = current_ua;
+  }
+  s_analytics_current_sample_count++;
+  portEXIT_CRITICAL();
+}
 
 #if FUEL_GAUGE_STATEFUL
 #define FUEL_GAUGE_SAVE_INTERVAL_S 300
@@ -363,7 +380,7 @@ static void prv_update_state(void *force_update) {
 
   s_last_voltage_mv = constants.v_mv;
   s_last_temp_mc = constants.t_mc;
-  s_last_current_ua = constants.i_ua;
+  prv_track_current_sample(constants.i_ua);
 
   now = rtc_get_ticks();
   delta = (now - prv_ref_time) / RTC_TICKS_HZ;
@@ -469,7 +486,6 @@ void battery_state_init(void) {
   PBL_ASSERTN(ret == 0);
 
   s_last_voltage_mv = constants.v_mv;
-  s_last_current_ua = constants.i_ua;
 
   ret = prv_fuel_gauge_init_common(&constants, true);
   PBL_ASSERTN(ret == 0);
@@ -524,6 +540,7 @@ void battery_state_init(void) {
   prv_ref_time = rtc_get_ticks();
 
   s_last_soc_cpct = (uint32_t)(pct * 100.0f);
+  prv_track_current_sample(constants.i_ua);
   prv_track_soc_min();
   s_last_battery_charge_state.pct = (uint8_t)ceilf(pct);
   s_last_battery_charge_state.charge_percent = (uint32_t)(pct * RATIO32_MAX) / 100U;
@@ -603,14 +620,38 @@ void command_print_battery_status(void) {
 void pbl_analytics_external_collect_battery(void) {
   int32_t battery_mv = s_last_voltage_mv;
   uint32_t battery_soc_cpct = s_last_soc_cpct;
+  int32_t battery_current_ua;
+  int32_t battery_current_avg_ua;
+  int32_t battery_current_peak_ua;
+  int64_t current_sum_ua;
+  uint32_t current_sample_count;
   int32_t d_mv;
   uint32_t d_soc_cpct;
+
+  portENTER_CRITICAL();
+  battery_current_ua = s_last_current_ua;
+  current_sum_ua = s_analytics_current_sum_ua;
+  battery_current_peak_ua = s_analytics_current_peak_ua;
+  current_sample_count = s_analytics_current_sample_count;
+  s_analytics_current_sum_ua = 0;
+  s_analytics_current_peak_ua = 0;
+  s_analytics_current_sample_count = 0;
+  portEXIT_CRITICAL();
+
+  battery_current_avg_ua =
+      current_sample_count ? (int32_t)(current_sum_ua / current_sample_count) : battery_current_ua;
+  if (current_sample_count == 0) {
+    battery_current_peak_ua = battery_current_ua;
+  }
 
   d_mv = battery_mv - s_analytics_last_voltage_mv;
   PBL_ANALYTICS_SET_UNSIGNED(battery_voltage, battery_mv);
   PBL_ANALYTICS_SET_SIGNED(battery_voltage_delta, d_mv);
   PBL_ANALYTICS_SET_SIGNED(battery_temp_c, s_last_temp_mc);
-  PBL_ANALYTICS_SET_SIGNED(battery_current_ua, s_last_current_ua);
+  PBL_ANALYTICS_SET_SIGNED(battery_current_ua, battery_current_ua);
+  PBL_ANALYTICS_SET_SIGNED(battery_current_avg_ua, battery_current_avg_ua);
+  PBL_ANALYTICS_SET_SIGNED(battery_current_peak_ua, battery_current_peak_ua);
+  PBL_ANALYTICS_SET_UNSIGNED(battery_current_sample_count, current_sample_count);
   PBL_ANALYTICS_SET_UNSIGNED(battery_soc_pct_min,
                              s_soc_cpct_min < battery_soc_cpct ? s_soc_cpct_min
                                                                : battery_soc_cpct);
