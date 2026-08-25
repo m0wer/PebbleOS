@@ -64,7 +64,6 @@ void hrm_manager_set_activity_scene(HRMActivityScene scene) {
 bool activity_prefs_hrm_activity_tracking_is_enabled(void) {
   return s_hrm_activity_tracking_enabled;
 }
-
 #include <dirent.h>
 #include <stdlib.h>
 #include <string.h>
