@@ -335,6 +335,10 @@ static void prv_handle_ready_event(VoiceUiData *data, PebbleVoiceServiceEvent *e
 }
 
 static bool prv_handle_dictation_success(VoiceUiData *data, PebbleVoiceServiceEvent *event) {
+  if (data->session_type == VoiceEndpointSessionTypeRecording) {
+    return true;
+  }
+
   if (data->buffer_size == 0) {
     // If buffer size is set to 0, the buffer was allocated when the last transcription was received
     applib_free(data->message);
@@ -385,6 +389,10 @@ static void prv_handle_dictation_result(VoiceUiData *data, PebbleVoiceServiceEve
     case VoiceStatusSuccess: {
       success = prv_handle_dictation_success(data, event);
       if (success) {
+        if (data->session_type == VoiceEndpointSessionTypeRecording) {
+          prv_exit_and_send_result_event(data, DictationSessionStatusSuccess);
+          break;
+        }
         if (data->state == StateRecording) {
           // Transition to unfold state (StateStopRecording) before pending a transition to the text
           // window
