@@ -41,6 +41,10 @@ bool sys_hrm_manager_unsubscribe(HRMSessionRef session) {
   return true;
 }
 
+bool activity_prefs_hrm_activity_tracking_is_enabled(void) {
+  return true;
+}
+
 #include <dirent.h>
 #include <stdlib.h>
 #include <string.h>
