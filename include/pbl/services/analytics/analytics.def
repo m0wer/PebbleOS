@@ -151,3 +151,7 @@ PBL_ANALYTICS_METRIC_DEFINE_UNSIGNED(touch_gated_touchdown_count)
 // Instantaneous fuel-gauge current in microamps; 0 on platforms without a
 // fuel gauge current source.
 PBL_ANALYTICS_METRIC_DEFINE_SIGNED(battery_current_ua)
+// Fuel-gauge samples since the prior heartbeat.
+PBL_ANALYTICS_METRIC_DEFINE_SIGNED(battery_current_avg_ua)
+PBL_ANALYTICS_METRIC_DEFINE_SIGNED(battery_current_peak_ua)
+PBL_ANALYTICS_METRIC_DEFINE_UNSIGNED(battery_current_sample_count)
