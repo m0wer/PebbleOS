@@ -69,6 +69,7 @@ static BatteryChargeStatus s_last_chg_status;
 static uint64_t prv_ref_time;
 static int32_t s_last_voltage_mv;
 static int32_t s_last_temp_mc;
+static int32_t s_last_current_ua;
 static uint32_t s_last_soc_cpct;
 static uint32_t s_soc_cpct_min = UINT32_MAX;
 static int32_t s_analytics_last_voltage_mv;
@@ -362,6 +363,7 @@ static void prv_update_state(void *force_update) {
 
   s_last_voltage_mv = constants.v_mv;
   s_last_temp_mc = constants.t_mc;
+  s_last_current_ua = constants.i_ua;
 
   now = rtc_get_ticks();
   delta = (now - prv_ref_time) / RTC_TICKS_HZ;
@@ -467,6 +469,7 @@ void battery_state_init(void) {
   PBL_ASSERTN(ret == 0);
 
   s_last_voltage_mv = constants.v_mv;
+  s_last_current_ua = constants.i_ua;
 
   ret = prv_fuel_gauge_init_common(&constants, true);
   PBL_ASSERTN(ret == 0);
@@ -607,6 +610,7 @@ void pbl_analytics_external_collect_battery(void) {
   PBL_ANALYTICS_SET_UNSIGNED(battery_voltage, battery_mv);
   PBL_ANALYTICS_SET_SIGNED(battery_voltage_delta, d_mv);
   PBL_ANALYTICS_SET_SIGNED(battery_temp_c, s_last_temp_mc);
+  PBL_ANALYTICS_SET_SIGNED(battery_current_ua, s_last_current_ua);
   PBL_ANALYTICS_SET_UNSIGNED(battery_soc_pct_min,
                              s_soc_cpct_min < battery_soc_cpct ? s_soc_cpct_min
                                                                : battery_soc_cpct);
