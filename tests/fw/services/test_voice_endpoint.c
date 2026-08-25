@@ -26,10 +26,12 @@ extern void voice_endpoint_protocol_msg_callback(CommSession *session, const uin
     size_t size);
 
 static VoiceEndpointSessionType s_session_type;
+static VoiceEndpointSessionType s_active_session_type;
 static VoiceEndpointResult s_session_result;
 static Transcription *s_transcription = NULL;
 static AudioEndpointSessionId s_session_id;
 static bool s_app_initiated;
+static bool s_recording_result_handled;
 static Uuid s_app_uuid;
 static uint8_t s_num_attributes;
 static char* s_reminder_str = NULL;
@@ -73,6 +75,22 @@ void voice_handle_dictation_result(VoiceEndpointResult result,
   s_app_initiated = app_initiated;
 }
 
+bool voice_is_recording_session(void) {
+  return s_active_session_type == VoiceEndpointSessionTypeRecording;
+}
+
+void voice_handle_recording_result(VoiceEndpointResult result,
+    AudioEndpointSessionId session_id, bool app_initiated, Uuid *app_uuid) {
+  s_recording_result_handled = true;
+  s_session_id = session_id;
+  s_session_result = result;
+  s_transcription = NULL;
+  if (app_uuid) {
+    memcpy(&s_app_uuid, app_uuid, sizeof(Uuid));
+  }
+  s_app_initiated = app_initiated;
+}
+
 void voice_handle_nlp_result(VoiceEndpointResult result, AudioEndpointSessionId session_id,
     char *reminder, time_t timestamp) {
   if (s_reminder_str) {
@@ -93,10 +111,12 @@ void voice_handle_nlp_result(VoiceEndpointResult result, AudioEndpointSessionId 
 // setup and teardown
 void test_voice_endpoint__initialize(void) {
   s_session_type = 0;
+  s_active_session_type = VoiceEndpointSessionTypeDictation;
   s_session_result = -1;
   s_session_id = AUDIO_ENDPOINT_SESSION_INVALID_ID;
 
   s_app_initiated = false;
+  s_recording_result_handled = false;
   s_app_uuid = UUID_INVALID;
 
   s_timestamp = 0;
@@ -201,6 +221,12 @@ void test_voice_endpoint__send_session_setup(void) {
   voice_endpoint_setup_session(VoiceEndpointSessionTypeNLP, s_session_id, &transfer_info,
       NULL);
   fake_comm_session_process_send_next();
+
+  s_session_type = VoiceEndpointSessionTypeRecording;
+  s_session_id = 3;
+  voice_endpoint_setup_session(VoiceEndpointSessionTypeRecording, s_session_id, &transfer_info,
+      NULL);
+  fake_comm_session_process_send_next();
 }
 
 void test_voice_endpoint__send_session_setup_app_initiated(void) {
@@ -221,6 +247,12 @@ void test_voice_endpoint__send_session_setup_app_initiated(void) {
   Uuid app_uuid = {0xa8, 0xc5, 0x63, 0x17, 0xa2, 0x89, 0x46, 0x5c,
                    0xbe, 0xf1, 0x5b, 0x98, 0x0d, 0xfd, 0xb0, 0x8a};
   voice_endpoint_setup_session(VoiceEndpointSessionTypeDictation, s_session_id, &transfer_info,
+      &app_uuid);
+  fake_comm_session_process_send_next();
+
+  s_session_type = VoiceEndpointSessionTypeRecording;
+  s_session_id = 3;
+  voice_endpoint_setup_session(VoiceEndpointSessionTypeRecording, s_session_id, &transfer_info,
       &app_uuid);
   fake_comm_session_process_send_next();
 }
@@ -464,6 +496,59 @@ void test_voice_endpoint__handle_dictation_result_app_initiated(void) {
 
   offset = sizeof(VoiceSessionResultMsg) + sizeof(GenericAttribute) + 0x2F + sizeof(GenericAttribute);
   cl_assert_equal_m(&s_app_uuid, &dictation_result_1[offset], sizeof(Uuid));
+}
+
+void test_voice_endpoint__handle_recording_result_without_transcription(void) {
+  const uint8_t recording_result[] = {
+    0x02,         // Message ID: Dictation result
+    0x01, 0x00, 0x00, 0x00,  // flags: app initiated
+    0x11, 0x22,   // Audio streaming session ID
+    0x00,         // Voice session result: success
+    0x01,         // attribute list: one attribute
+    0x03,         // attribute type: App UUID
+    0x10, 0x00,   // attribute length
+    0xa8, 0xc5, 0x63, 0x17, 0xa2, 0x89, 0x46, 0x5c,
+    0xbe, 0xf1, 0x5b, 0x98, 0x0d, 0xfd, 0xb0, 0x8a,
+  };
+
+  s_active_session_type = VoiceEndpointSessionTypeRecording;
+  voice_endpoint_protocol_msg_callback(NULL, recording_result, sizeof(recording_result));
+  fake_system_task_callbacks_invoke_pending();
+
+  cl_assert_equal_b(s_recording_result_handled, true);
+  cl_assert_equal_p(s_transcription, NULL);
+  cl_assert_equal_i(s_session_id, 0x2211);
+  cl_assert_equal_i(s_session_result, VoiceEndpointResultSuccess);
+  cl_assert_equal_i(s_app_initiated, true);
+  cl_assert_equal_m(&s_app_uuid, &recording_result[12], sizeof(Uuid));
+}
+
+void test_voice_endpoint__handle_recording_result_ignores_transcription(void) {
+  const uint8_t recording_result[] = {
+    0x02,         // Message ID: Dictation result
+    0x01, 0x00, 0x00, 0x00,  // flags: app initiated
+    0x11, 0x22,   // Audio streaming session ID
+    0x00,         // Voice session result: success
+    0x02,         // attribute list: two attributes
+    0x02,         // attribute type: transcription
+    0x02, 0x00,   // attribute length
+    0x01, 0x00,   // transcription type, zero sentences
+    0x03,         // attribute type: App UUID
+    0x10, 0x00,   // attribute length
+    0xa8, 0xc5, 0x63, 0x17, 0xa2, 0x89, 0x46, 0x5c,
+    0xbe, 0xf1, 0x5b, 0x98, 0x0d, 0xfd, 0xb0, 0x8a,
+  };
+
+  s_active_session_type = VoiceEndpointSessionTypeRecording;
+  voice_endpoint_protocol_msg_callback(NULL, recording_result, sizeof(recording_result));
+  fake_system_task_callbacks_invoke_pending();
+
+  cl_assert_equal_b(s_recording_result_handled, true);
+  cl_assert_equal_p(s_transcription, NULL);
+  cl_assert_equal_i(s_session_id, 0x2211);
+  cl_assert_equal_i(s_session_result, VoiceEndpointResultSuccess);
+  cl_assert_equal_i(s_app_initiated, true);
+  cl_assert_equal_m(&s_app_uuid, &recording_result[17], sizeof(Uuid));
 }
 
 void test_voice_endpoint__handle_nlp_result(void) {

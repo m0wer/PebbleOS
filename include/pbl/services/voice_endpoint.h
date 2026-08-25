@@ -13,8 +13,9 @@
 
 typedef enum {
   VoiceEndpointSessionTypeDictation = 0x01,
-  VoiceEndpointSessionTypeCommand = 0x02,   // Not used yet
+  VoiceEndpointSessionTypeCommand = 0x02,  // Not used yet
   VoiceEndpointSessionTypeNLP = 0x03,
+  VoiceEndpointSessionTypeRecording = 0x04,
 
   VoiceEndpointSessionTypeCount,
 } VoiceEndpointSessionType;
@@ -38,6 +39,7 @@ typedef struct PACKED {
   uint16_t frame_size;
 } AudioTransferInfoSpeex;
 
-//! Called by the voice service to set up a dictation or command recognition session
+//! Called by the voice service to set up a voice session
 void voice_endpoint_setup_session(VoiceEndpointSessionType session_type,
-    AudioEndpointSessionId session_id, AudioTransferInfoSpeex *info, Uuid *app_uuid);
+                                  AudioEndpointSessionId session_id, AudioTransferInfoSpeex *info,
+                                  Uuid *app_uuid);
