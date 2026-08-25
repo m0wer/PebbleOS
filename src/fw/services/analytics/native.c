@@ -1,6 +1,7 @@
 /* SPDX-FileCopyrightText: 2026 Core Devices LLC */
 /* SPDX-License-Identifier: Apache-2.0 */
 
+#include <stddef.h>
 #include <string.h>
 
 #include "console/prompt.h"
@@ -136,6 +137,29 @@ static const int8_t s_key_to_integer[] = {
 #undef PBL_ANALYTICS_METRIC_DEFINE_STRING
 };
 
+static const uint16_t s_integer_record_offsets[] = {
+#define PBL_ANALYTICS_METRIC_DEFINE_UNSIGNED(key) \
+  offsetof(struct native_heartbeat_record, metric_##key),
+#define PBL_ANALYTICS_METRIC_DEFINE_SIGNED(key) \
+  offsetof(struct native_heartbeat_record, metric_##key),
+#define PBL_ANALYTICS_METRIC_DEFINE_SCALED_UNSIGNED(key, scale) \
+  offsetof(struct native_heartbeat_record, metric_##key),
+#define PBL_ANALYTICS_METRIC_DEFINE_SCALED_SIGNED(key, scale) \
+  offsetof(struct native_heartbeat_record, metric_##key),
+#define PBL_ANALYTICS_METRIC_DEFINE_TIMER(key)
+#define PBL_ANALYTICS_METRIC_DEFINE_STRING(key, len)
+#include "pbl/services/analytics/analytics.def"
+#undef PBL_ANALYTICS_METRIC_DEFINE_UNSIGNED
+#undef PBL_ANALYTICS_METRIC_DEFINE_SIGNED
+#undef PBL_ANALYTICS_METRIC_DEFINE_SCALED_UNSIGNED
+#undef PBL_ANALYTICS_METRIC_DEFINE_SCALED_SIGNED
+#undef PBL_ANALYTICS_METRIC_DEFINE_TIMER
+#undef PBL_ANALYTICS_METRIC_DEFINE_STRING
+};
+
+_Static_assert(ARRAY_LENGTH(s_integer_record_offsets) == NATIVE_INTEGER_COUNT,
+               "integer metric offsets must match integer storage");
+
 static const int8_t s_key_to_timer[] = {
 #define PBL_ANALYTICS_METRIC_DEFINE_UNSIGNED(key) -1,
 #define PBL_ANALYTICS_METRIC_DEFINE_SIGNED(key) -1,
@@ -255,16 +279,17 @@ static void prv_record_metrics(struct native_heartbeat_record *record, bool rese
     }
   }
 
-  /* Build heartbeat record from type-specific storage */
-#define PBL_ANALYTICS_METRIC_DEFINE_UNSIGNED(key) \
-  record->metric_##key = (uint32_t)s_integer_values[NATIVE_INTEGER_IDX_##key];
-#define PBL_ANALYTICS_METRIC_DEFINE_SIGNED(key) \
-  record->metric_##key = s_integer_values[NATIVE_INTEGER_IDX_##key];
-#define PBL_ANALYTICS_METRIC_DEFINE_SCALED_UNSIGNED(key, scale)                \
-  record->metric_##key = (uint32_t)s_integer_values[NATIVE_INTEGER_IDX_##key]; \
+  /* Integer values share a representation, but their record fields are interleaved by type. */
+  for (size_t i = 0; i < NATIVE_INTEGER_COUNT; i++) {
+    memcpy((uint8_t *)record + s_integer_record_offsets[i], &s_integer_values[i],
+           sizeof(s_integer_values[i]));
+  }
+
+#define PBL_ANALYTICS_METRIC_DEFINE_UNSIGNED(key)
+#define PBL_ANALYTICS_METRIC_DEFINE_SIGNED(key)
+#define PBL_ANALYTICS_METRIC_DEFINE_SCALED_UNSIGNED(key, scale) \
   record->metric_##key##_scale = (scale);
-#define PBL_ANALYTICS_METRIC_DEFINE_SCALED_SIGNED(key, scale)        \
-  record->metric_##key = s_integer_values[NATIVE_INTEGER_IDX_##key]; \
+#define PBL_ANALYTICS_METRIC_DEFINE_SCALED_SIGNED(key, scale) \
   record->metric_##key##_scale = (scale);
 #define PBL_ANALYTICS_METRIC_DEFINE_TIMER(key) \
   record->metric_##key = timer_value_ms[NATIVE_TIMER_IDX_##key];
