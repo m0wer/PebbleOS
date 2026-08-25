@@ -29,6 +29,7 @@
 #include "process_management/app_run_state.h"
 #include "process_management/process_manager.h"
 #include "process_management/worker_manager.h"
+#include "popups/notifications/notification_window.h"
 #include "pbl/services/analytics/analytics.h"
 #include "pbl/services/battery/battery_state.h"
 #include "pbl/services/battery/battery_monitor.h"
@@ -70,6 +71,16 @@
 
 static const uint32_t FORCE_QUIT_HOLD_MS = 1500;
 static int s_back_hold_timer = TIMER_INVALID_ID;
+
+static const uint32_t DOUBLE_FLICK_DISMISS_WINDOW_MS = 1500;
+static bool s_double_flick_dismiss_pending = false;
+static RtcTicks s_double_flick_dismiss_first_ticks = 0;
+static Uuid s_double_flick_dismiss_notification_id = UUID_INVALID_INIT;
+
+static void prv_clear_double_flick_dismiss_pending(void) {
+  s_double_flick_dismiss_pending = false;
+  s_double_flick_dismiss_notification_id = UUID_INVALID;
+}
 
 #ifndef CONFIG_SHELL_SDK
 static const uint32_t BACK_QUICKPRESS_INTERVAL_TICKS = 300;
@@ -264,13 +275,37 @@ static NOINLINE void prv_minimal_event_handler(PebbleEvent* e) {
     case PEBBLE_ACCEL_SHAKE_EVENT:
       if (backlight_is_motion_enabled()) {
 #ifndef CONFIG_RECOVERY_FW
-        const bool dnd_suppresses_backlight = do_not_disturb_is_active() &&
-                                             !alerts_preferences_dnd_get_motion_backlight();
+        const bool dnd_suppresses_backlight =
+            do_not_disturb_is_active() && !alerts_preferences_dnd_get_motion_backlight();
         if (!dnd_suppresses_backlight)
 #endif
         {
           light_enable_interaction();
         }
+      }
+      if (!shell_prefs_get_double_flick_dismiss_notification_enabled()) {
+        prv_clear_double_flick_dismiss_pending();
+        return;
+      }
+      Uuid notification_id;
+      if (!notification_window_get_current_modal_dismissible_notification_id(&notification_id)) {
+        prv_clear_double_flick_dismiss_pending();
+        return;
+      }
+
+      const RtcTicks now = rtc_get_ticks();
+      const RtcTicks dismiss_window_ticks =
+          (RtcTicks)DOUBLE_FLICK_DISMISS_WINDOW_MS * RTC_TICKS_HZ / 1000;
+      if (s_double_flick_dismiss_pending &&
+          uuid_equal(&s_double_flick_dismiss_notification_id, &notification_id) &&
+          (now - s_double_flick_dismiss_first_ticks) <= dismiss_window_ticks) {
+        // Clear before invoking so another queued shake cannot repeat this dismissal.
+        prv_clear_double_flick_dismiss_pending();
+        notification_window_dismiss_current_modal_notification();
+      } else {
+        s_double_flick_dismiss_pending = true;
+        s_double_flick_dismiss_first_ticks = now;
+        s_double_flick_dismiss_notification_id = notification_id;
       }
       return;
 

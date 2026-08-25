@@ -85,6 +85,9 @@ static uint32_t s_backlight_color; // default pulled from BOARD_CONFIG in shell_
 #define PREF_KEY_BACKLIGHT_MOTION "lightMotion"
 static bool s_backlight_motion_enabled = true;
 
+#define PREF_KEY_DOUBLE_FLICK_DISMISS_NOTIFICATION "doubleFlickDismissNotification"
+static bool s_double_flick_dismiss_notification_enabled = false;
+
 #define PREF_KEY_BACKLIGHT_TOUCH "lightTouch"
 static uint8_t s_backlight_touch_wake = BacklightTouchWake_DoubleTap;
 
@@ -422,6 +425,11 @@ static bool prv_set_s_backlight_color(uint32_t *rgb_color) {
 static bool prv_set_s_backlight_motion_enabled(bool *enabled) {
   s_backlight_motion_enabled = *enabled;
   accel_manager_set_motion_backlight_enabled(*enabled);
+  return true;
+}
+
+static bool prv_set_s_double_flick_dismiss_notification_enabled(bool *enabled) {
+  s_double_flick_dismiss_notification_enabled = *enabled;
   return true;
 }
 
@@ -1364,6 +1372,14 @@ bool backlight_is_motion_enabled(void) {
 
 void backlight_set_motion_enabled(bool enable) {
   prv_pref_set(PREF_KEY_BACKLIGHT_MOTION, &enable, sizeof(enable));
+}
+
+bool shell_prefs_get_double_flick_dismiss_notification_enabled(void) {
+  return s_double_flick_dismiss_notification_enabled;
+}
+
+void shell_prefs_set_double_flick_dismiss_notification_enabled(bool enable) {
+  prv_pref_set(PREF_KEY_DOUBLE_FLICK_DISMISS_NOTIFICATION, &enable, sizeof(enable));
 }
 
 BacklightTouchWake backlight_get_touch_wake(void) {
