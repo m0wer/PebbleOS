@@ -613,14 +613,30 @@ bool activity_metrics_prv_is_hrm_offwrist(time_t now_utc) {
   bool offwrist = false;
   pbl_mutex_lock(&state->mutex, PBL_FOREVER);
   {
-    if (state->hr.last_quality_event_utc != 0 &&
-        state->hr.last_quality_was_offwrist &&
+    if (state->hr.last_quality_event_utc != 0 && state->hr.last_quality_was_offwrist &&
+        now_utc >= state->hr.last_quality_event_utc &&
         (now_utc - state->hr.last_quality_event_utc) <= ACTIVITY_HRM_OFFWRIST_STALE_SEC) {
       offwrist = true;
     }
   }
   pbl_mutex_unlock(&state->mutex);
   return offwrist;
+}
+
+// --------------------------------------------------------------------------------------------
+bool activity_metrics_prv_is_hrm_worn(time_t now_utc) {
+  ActivityState *state = activity_private_state();
+  bool worn = false;
+  mutex_lock_recursive(state->mutex);
+  {
+    if (state->hr.last_quality_event_utc != 0 && !state->hr.last_quality_was_offwrist &&
+        now_utc >= state->hr.last_quality_event_utc &&
+        (now_utc - state->hr.last_quality_event_utc) <= ACTIVITY_HRM_OFFWRIST_STALE_SEC) {
+      worn = true;
+    }
+  }
+  mutex_unlock_recursive(state->mutex);
+  return worn;
 }
 
 // --------------------------------------------------------------------------------------------
