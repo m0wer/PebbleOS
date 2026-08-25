@@ -131,7 +131,9 @@ typedef struct {
   uint16_t vmc;
   uint8_t orientation;
   bool definitely_not_worn;
+#ifdef CONFIG_HRM
   bool definitely_worn;
+#endif
   bool sleep_intent_hint;
 } KAlgSleepMinute;
 
@@ -147,12 +149,14 @@ typedef struct {
   uint16_t consecutive_awake_intent_minutes;
   uint16_t num_non_zero_awake_tail;
   uint32_t vmc_sum_awake_tail;
+#ifdef CONFIG_HRM
   uint16_t worn_evidence_minutes;
   uint16_t definitely_not_worn_minutes;
   uint16_t worn_evidence_awake_tail;
   uint16_t definitely_not_worn_awake_tail;
   uint16_t consecutive_sleep_worn_evidence_minutes;
   uint16_t consecutive_sleep_definitely_not_worn_minutes;
+#endif
 } KAlgSleepActivityStats;
 
 typedef struct {
@@ -1545,9 +1549,13 @@ static bool prv_not_worn_during_session(KAlgState *alg_state, time_t session_sta
 
     if ((state->potential_not_worn_start[i] <= not_worn_start_boundary)
         && (not_worn_end >= not_worn_end_boundary)) {
+#ifdef CONFIG_HRM
       if (allow_worn_override) {
         continue;
       }
+#else
+      (void)allow_worn_override;
+#endif
       KALG_LOG_DEBUG("detected not worn from %s for %"PRIu16" minutes",
                      prv_log_time(alg_state, state->potential_not_worn_start[i]),
                      state->potential_not_worn_len_m[i]);
@@ -1729,6 +1737,9 @@ static bool prv_sleep_activity_update_stats(KAlgState *alg_state, time_t utc_now
   // Handy access to some variables
   const KAlgSleepParams *params = &KALG_SLEEP_PARAMS;
   KAlgSleepActivityState *state = &alg_state->sleep_state;
+#ifndef CONFIG_HRM
+  (void)definitely_worn;
+#endif
 
   // Add this data to our history
   const unsigned int history_capacity = ARRAY_LENGTH(state->minute_history);
@@ -1741,7 +1752,9 @@ static bool prv_sleep_activity_update_stats(KAlgState *alg_state, time_t utc_now
       .vmc = vmc,
       .orientation = orientation,
       .definitely_not_worn = definitely_not_worn,
+#ifdef CONFIG_HRM
       .definitely_worn = definitely_worn,
+#endif
       .sleep_intent_hint = sleep_intent_hint,
   };
 
@@ -1760,7 +1773,9 @@ static bool prv_sleep_activity_update_stats(KAlgState *alg_state, time_t utc_now
   bool is_sleep_minute = ((score <= params->max_sleep_minute_score) && !not_worn);
   const KAlgSleepMinute *sample = &state->minute_history[KALG_SLEEP_HALF_WIDTH];
   definitely_not_worn = sample->definitely_not_worn;
+#ifdef CONFIG_HRM
   definitely_worn = sample->definitely_worn;
+#endif
   sleep_intent_hint = sample->sleep_intent_hint;
 
   // ----------------------------------------------------------------------------------
@@ -1769,19 +1784,25 @@ static bool prv_sleep_activity_update_stats(KAlgState *alg_state, time_t utc_now
     state->current_stats.consecutive_sleep_minutes++;
     state->current_stats.consecutive_awake_minutes = 0;
     state->current_stats.consecutive_sleep_intent_minutes += sleep_intent_hint;
+#ifdef CONFIG_HRM
     state->current_stats.consecutive_sleep_worn_evidence_minutes += definitely_worn;
     state->current_stats.consecutive_sleep_definitely_not_worn_minutes += definitely_not_worn;
+#endif
     state->current_stats.consecutive_awake_intent_minutes = 0;
     state->current_stats.num_non_zero_awake_tail = 0;
     state->current_stats.vmc_sum_awake_tail = 0;
+#ifdef CONFIG_HRM
     state->current_stats.worn_evidence_awake_tail = 0;
     state->current_stats.definitely_not_worn_awake_tail = 0;
+#endif
   } else {
     state->current_stats.consecutive_sleep_minutes = 0;
     state->current_stats.consecutive_awake_minutes++;
     state->current_stats.consecutive_sleep_intent_minutes = 0;
+#ifdef CONFIG_HRM
     state->current_stats.consecutive_sleep_worn_evidence_minutes = 0;
     state->current_stats.consecutive_sleep_definitely_not_worn_minutes = 0;
+#endif
     state->current_stats.consecutive_awake_intent_minutes += sleep_intent_hint;
   }
   if (score > params->min_valid_vmc) {
@@ -1794,12 +1815,16 @@ static bool prv_sleep_activity_update_stats(KAlgState *alg_state, time_t utc_now
   if (state->current_stats.start_time != KALG_START_TIME_NONE) {
     state->current_stats.vmc_sum += MIN(params->vmc_clip, vmc);
     state->current_stats.sleep_intent_minutes += sleep_intent_hint;
+#ifdef CONFIG_HRM
     state->current_stats.worn_evidence_minutes += definitely_worn;
     state->current_stats.definitely_not_worn_minutes += definitely_not_worn;
+#endif
     if (!is_sleep_minute) {
       state->current_stats.vmc_sum_awake_tail += MIN(params->vmc_clip, vmc);
+#ifdef CONFIG_HRM
       state->current_stats.worn_evidence_awake_tail += definitely_worn;
       state->current_stats.definitely_not_worn_awake_tail += definitely_not_worn;
+#endif
     }
   }
 
@@ -1852,14 +1877,18 @@ static void prv_sleep_activity_update_session_state(
       state->current_stats.vmc_sum = 0;
       state->current_stats.sleep_intent_minutes =
           state->current_stats.consecutive_sleep_intent_minutes;
+#ifdef CONFIG_HRM
       state->current_stats.worn_evidence_minutes =
           state->current_stats.consecutive_sleep_worn_evidence_minutes;
       state->current_stats.definitely_not_worn_minutes =
           state->current_stats.consecutive_sleep_definitely_not_worn_minutes;
+#endif
       state->current_stats.num_non_zero_awake_tail = 0;
       state->current_stats.vmc_sum_awake_tail = 0;
+#ifdef CONFIG_HRM
       state->current_stats.worn_evidence_awake_tail = 0;
       state->current_stats.definitely_not_worn_awake_tail = 0;
+#endif
 
       KALG_LOG_DEBUG("Detected bedtime at %s", prv_log_time(alg_state,
                                                             state->current_stats.start_time));
@@ -2090,6 +2119,7 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
     uint16_t session_len_m = (sleep_end_time - state->current_stats.start_time)
                              / SECONDS_PER_MINUTE;
     const bool is_long_cycle = (session_len_m >= params->min_sleep_cycle_len_minutes);
+#ifdef CONFIG_HRM
     const uint16_t worn_evidence_minutes = state->current_stats.worn_evidence_minutes -
                                            MIN(state->current_stats.worn_evidence_minutes,
                                                state->current_stats.worn_evidence_awake_tail);
@@ -2099,6 +2129,10 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
             state->current_stats.definitely_not_worn_awake_tail);
     const bool has_worn_evidence = (worn_evidence_minutes > 0);
     const bool has_definite_not_worn = (definitely_not_worn_minutes > 0);
+#else
+    const bool has_worn_evidence = false;
+    const bool has_definite_not_worn = false;
+#endif
     // Detected waking up. Validate the other constraints of a sleep cycle
     KALG_LOG_DEBUG("Detected wake at %s, cycle_len: %u",  prv_log_time(alg_state, sleep_end_time),
                    session_len_m);

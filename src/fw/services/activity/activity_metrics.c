@@ -596,6 +596,7 @@ void activity_metrics_prv_reset_hr_stats(void) {
   mutex_unlock_recursive(state->mutex);
 }
 
+#ifdef CONFIG_HRM
 // --------------------------------------------------------------------------------------------
 void activity_metrics_prv_set_hrm_worn_status(time_t now_utc, bool is_offwrist) {
   ActivityState *state = activity_private_state();
@@ -638,6 +639,7 @@ bool activity_metrics_prv_is_hrm_worn(time_t now_utc) {
   mutex_unlock_recursive(state->mutex);
   return worn;
 }
+#endif
 
 // --------------------------------------------------------------------------------------------
 void activity_metrics_prv_add_median_hr_sample(PebbleHRMEvent *hrm_event, time_t now_utc,

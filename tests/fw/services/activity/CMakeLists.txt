@@ -85,7 +85,7 @@ pbl_clar_test(test_activity_algorithm_kraepelin
     tests/fakes/fake_events.c
     tests/fakes/fake_rtc.c
     tests/fakes/fake_spi_flash.c
-  DEFINES DUMA_DISABLED
+  DEFINES DUMA_DISABLED CONFIG_HRM
   OVERRIDES dummy_board
 )
 

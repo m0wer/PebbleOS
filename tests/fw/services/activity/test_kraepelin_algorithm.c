@@ -59,7 +59,6 @@ bool sys_hrm_manager_set_update_interval(HRMSessionRef session, uint32_t update_
 bool activity_prefs_hrm_activity_tracking_is_enabled(void) {
   return s_hrm_activity_tracking_enabled;
 }
-
 #include <dirent.h>
 #include <stdlib.h>
 #include <string.h>
