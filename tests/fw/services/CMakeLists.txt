@@ -503,3 +503,10 @@ pbl_clar_test(test_app_glance_service
     tests/fakes/fake_settings_file.c
   OVERRIDES dummy_board
 )
+
+pbl_clar_test(test_analytics_native
+  SOURCES
+    src/fw/services/analytics/native.c
+    tests/fakes/fake_rtc.c
+  PLATFORMS asterix
+)
