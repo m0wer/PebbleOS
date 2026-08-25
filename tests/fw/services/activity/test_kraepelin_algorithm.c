@@ -1606,7 +1606,7 @@ void test_kraepelin_algorithm__sleep_tests(void) {
       const bool shutting_down = (entry->force_shut_down_at == i);
       kalg_activities_update(s_kalg_state, now, entry->samples[i].v5_fields.steps, vmc,
                              entry->samples[i].v5_fields.orientation,
-                             entry->samples[i].v5_fields.plugged_in,
+                             entry->samples[i].v5_fields.plugged_in, false /*sleep_intent_hint*/,
                              0 /*rest_cals*/, 0 /*active_cals*/, 0 /*distance*/, shutting_down,
                              prv_sleep_session_callback, NULL);
       if (shutting_down) {
@@ -1766,9 +1766,9 @@ void test_kraepelin_algorithm__activity_tests(void) {
     for (int i = 0; i < entry->num_samples; i++) {
       const bool shutting_down = (entry->force_shut_down_at == i);
       kalg_activities_update(s_kalg_state, now, entry->samples[i].v5_fields.steps, 0 /*vmc*/,
-                             0 /*orientation*/, false /*definitely_not_worn*/, 0 /*rest_cals*/,
-                             0 /*active_cals*/, 0 /*distance*/, shutting_down,
-                             prv_activity_session_callback, NULL);
+                             0 /*orientation*/, false /*definitely_not_worn*/,
+                             false /*sleep_intent_hint*/, 0 /*rest_cals*/, 0 /*active_cals*/,
+                             0 /*distance*/, shutting_down, prv_activity_session_callback, NULL);
       if (shutting_down) {
         break;
       }
@@ -1995,8 +1995,9 @@ static void prv_feed_activity_minutes(KAlgTestActivityMinute *samples, int sampl
     // NOTE: We feed in a significant VMC to simulate activity so that the sleep algorithm
     // doesn't think we're sleeping
     kalg_activities_update(s_kalg_state, now, samples[i].steps, 7000 /*vmc*/, 0 /*orientation*/,
-                           true /*definitely_not_worn*/, samples[i].resting_calories,
-                           samples[i].active_calories, samples[i].distance_mm, false /* shutting_down */,
+                           true /*definitely_not_worn*/, false /*sleep_intent_hint*/,
+                           samples[i].resting_calories, samples[i].active_calories,
+                           samples[i].distance_mm, false /* shutting_down */,
                            prv_activity_session_callback, NULL);
     now += SECONDS_PER_MINUTE;
     rtc_set_time(now);
@@ -2164,9 +2165,9 @@ void test_kraepelin_algorithm__sleep_stats(void) {
     uint16_t vmc = samples[i].vmc;
     // Convert from the old compressed VMC to the new uncompressed one
     vmc = vmc * vmc * 1850 / 1250;
-    kalg_activities_update(s_kalg_state, now, samples[i].steps, vmc,
-                           samples[i].orientation, samples[i].plugged_in,
-                           0 /*rest_cals*/, 0 /*active_cals*/, 0 /*distance*/, false /* shutting_down */,
+    kalg_activities_update(s_kalg_state, now, samples[i].steps, vmc, samples[i].orientation,
+                           samples[i].plugged_in, false /*sleep_intent_hint*/, 0 /*rest_cals*/,
+                           0 /*active_cals*/, 0 /*distance*/, false /* shutting_down */,
                            prv_sleep_session_callback, NULL);
 
     // This particular sample has sleep from minute 32 to 353
@@ -2207,4 +2208,156 @@ void test_kraepelin_algorithm__sleep_stats(void) {
   s_kalg_state = NULL;
 }
 
+// =============================================================================================
+// Synthetic cycle tests for fragmented sleep and optional sleep intent hints.
+static time_t s_synth_now;
 
+static void prv_synth_start(void) {
+  s_synth_now = SECONDS_PER_MINUTE;
+  rtc_set_time(s_synth_now);
+  s_kalg_state = kernel_zalloc(kalg_state_size());
+  kalg_init(s_kalg_state, prv_stats_cb);
+  s_num_captured_sleep_sessions = 0;
+}
+
+static void prv_synth_end(void) {
+  kernel_free(s_kalg_state);
+  s_kalg_state = NULL;
+}
+
+static void prv_synth_minute(uint16_t vmc, uint8_t orientation, bool definitely_not_worn,
+                             bool sleep_intent_hint) {
+  kalg_activities_update(s_kalg_state, s_synth_now, 0 /*steps*/, vmc, orientation,
+                         definitely_not_worn, sleep_intent_hint, 0 /*rest_cals*/, 0 /*active_cals*/,
+                         0 /*distance*/, false /*shutting_down*/, prv_sleep_session_callback, NULL);
+  s_synth_now += SECONDS_PER_MINUTE;
+  rtc_set_time(s_synth_now);
+}
+
+static void prv_synth_sleep(int minutes, bool definitely_not_worn, bool sleep_intent_hint) {
+  static const uint8_t k_orientations[] = {0x41, 0x52, 0x63, 0x74};
+  for (int i = 0; i < minutes; i++) {
+    prv_synth_minute(5, k_orientations[(s_synth_now / (17 * SECONDS_PER_MINUTE)) % 4],
+                     definitely_not_worn, sleep_intent_hint);
+  }
+}
+
+static void prv_synth_motion(int minutes) {
+  static const uint8_t k_orientations[] = {0x41, 0x62, 0x73, 0x54};
+  for (int i = 0; i < minutes; i++) {
+    prv_synth_minute(4000, k_orientations[i % 4], false /*definitely_not_worn*/,
+                     false /*sleep_intent_hint*/);
+  }
+}
+
+static void prv_synth_table(int minutes, bool sleep_intent_hint) {
+  for (int i = 0; i < minutes; i++) {
+    prv_synth_minute(0, 0x05, true /*definitely_not_worn*/, sleep_intent_hint);
+  }
+}
+
+static int prv_synth_container_count(void) {
+  int count = 0;
+  for (int i = 0; i < s_num_captured_sleep_sessions; i++) {
+    count += s_captured_sleep_sessions[i].activity == KAlgActivityType_Sleep;
+  }
+  return count;
+}
+
+static bool prv_synth_has_short_container(void) {
+  for (int i = 0; i < s_num_captured_sleep_sessions; i++) {
+    if ((s_captured_sleep_sessions[i].activity == KAlgActivityType_Sleep) &&
+        (s_captured_sleep_sessions[i].len_m >= 10) && (s_captured_sleep_sessions[i].len_m < 60)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void test_kraepelin_algorithm__fragmented_short_cycle_requires_follower(void) {
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_sleep(75, false, false);
+  prv_synth_motion(16);
+  prv_synth_sleep(20, false, false);
+  prv_synth_motion(16);
+
+  cl_assert_equal_i(prv_synth_container_count(), 1);
+
+  prv_synth_sleep(75, false, false);
+  cl_assert_equal_i(prv_synth_container_count(), 3);
+  cl_assert(prv_synth_has_short_container());
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__final_fragment_is_dropped(void) {
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_sleep(75, false, false);
+  prv_synth_motion(16);
+  prv_synth_sleep(20, false, false);
+  prv_synth_motion(30);
+
+  cl_assert_equal_i(prv_synth_container_count(), 1);
+  cl_assert(!prv_synth_has_short_container());
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__chained_short_fragments_are_confirmed(void) {
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_sleep(75, false, false);
+  for (int i = 0; i < 2; i++) {
+    prv_synth_motion(16);
+    prv_synth_sleep(20, false, false);
+  }
+  prv_synth_motion(16);
+  prv_synth_sleep(75, false, false);
+
+  cl_assert_equal_i(prv_synth_container_count(), 4);
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__short_cycle_sleep_intent_hint(void) {
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_sleep(20, false, true);
+  prv_synth_motion(20);
+  cl_assert_equal_i(prv_synth_container_count(), 1);
+  cl_assert(prv_synth_has_short_container());
+  prv_synth_end();
+
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_sleep(20, false, false);
+  prv_synth_motion(20);
+  cl_assert_equal_i(prv_synth_container_count(), 0);
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__short_cycle_on_table_is_rejected(void) {
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_table(15, true);
+  prv_synth_motion(20);
+  cl_assert_equal_i(prv_synth_container_count(), 0);
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__rejected_candidate_cannot_anchor_later_cycle(void) {
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_sleep(75, false, false);
+  prv_synth_motion(16);
+  prv_synth_sleep(20, false, false);
+  prv_synth_motion(16);
+  prv_synth_table(20, false);
+  prv_synth_motion(16);
+  prv_synth_sleep(20, false, false);
+  prv_synth_motion(16);
+  prv_synth_sleep(75, false, false);
+
+  cl_assert_equal_i(prv_synth_container_count(), 2);
+  cl_assert(!prv_synth_has_short_container());
+  prv_synth_end();
+}
