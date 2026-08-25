@@ -132,6 +132,8 @@ uint32_t kalg_analyze_finish_epoch(KAlgState *state);
 //                       (caller passes "plugged into charger" OR'd with any other definite
 //                       not-worn hints such as a recent HRM off-wrist reading). Treated as a
 //                       hard "not worn" signal for sleep detection.
+// @param[in] sleep_intent_hint true when an optional external signal suggests the user intends
+//                              to sleep during this minute.
 // @param[in] resting_calories number of resting calories burned in the last minute
 // @param[in] active_calories number of active calories burned in the last minute
 // @param[in] distance_mm distance covered in millimeters in the last minute
@@ -139,9 +141,9 @@ uint32_t kalg_analyze_finish_epoch(KAlgState *state);
 //            session that it finds.
 // @param[in] context passed to the sessions_cb
 void kalg_activities_update(KAlgState *state, time_t utc_now, uint16_t steps, uint16_t vmc,
-                            uint8_t orientation, bool definitely_not_worn,
-                            uint32_t resting_calories,
-                            uint32_t active_calories, uint32_t distance_mm, bool shutting_down,
+                            uint8_t orientation, bool definitely_not_worn, bool sleep_intent_hint,
+                            uint32_t resting_calories, uint32_t active_calories,
+                            uint32_t distance_mm, bool shutting_down,
                             KAlgActivitySessionCallback sessions_cb, void *context);
 
 // Return the timestamp of the last minute that was processed for the given activity type

@@ -124,11 +124,14 @@ typedef struct {
 
 // ----------------------------------------------------------------------------------------
 // Sleep detection structures
+#define KALG_MAX_DEEP_SLEEP_SESSIONS 8
+
 // The data for each minute that we use for computing sleep
 typedef struct {
   uint16_t vmc;
   uint8_t orientation;
   bool definitely_not_worn;
+  bool sleep_intent_hint;
 } KAlgSleepMinute;
 
 // State information for sleep detection
@@ -138,7 +141,20 @@ typedef struct {
   uint32_t vmc_sum;
   uint16_t consecutive_sleep_minutes;
   uint16_t consecutive_awake_minutes;
+  uint16_t sleep_intent_minutes;
+  uint16_t consecutive_sleep_intent_minutes;
+  uint16_t consecutive_awake_intent_minutes;
+  uint16_t num_non_zero_awake_tail;
+  uint32_t vmc_sum_awake_tail;
 } KAlgSleepActivityStats;
+
+typedef struct {
+  time_t start_utc;
+  uint16_t len_m;
+  uint8_t num_deep;
+  uint16_t deep_start_delta_sec[KALG_MAX_DEEP_SLEEP_SESSIONS];
+  uint16_t deep_len_m[KALG_MAX_DEEP_SLEEP_SESSIONS];
+} KAlgPendingSleepCycle;
 
 typedef struct {
   // We do a convolution of encoded VMC values to get a score. This convolution requires
@@ -149,6 +165,9 @@ typedef struct {
   KAlgSleepActivityStats current_stats;
   KAlgOngoingSleepStats summary_stats;
   time_t last_sample_utc;
+
+  time_t confirmed_cycle_end_utc;
+  KAlgPendingSleepCycle pending_cycle;
 } KAlgSleepActivityState;
 
 // Params used for sleep detection
@@ -190,6 +209,9 @@ typedef struct {
   // We only start checking the percent of active minutes and average VMC when the sleep cycle
   // is at least this long
   uint16_t min_sleep_len_for_active_pct_check;
+
+  uint16_t min_short_sleep_cycle_len_minutes;
+  uint16_t max_fragmented_sleep_gap_minutes;
 } KAlgSleepParams;
 
 
@@ -211,6 +233,8 @@ static const KAlgSleepParams KALG_SLEEP_PARAMS = {
   .max_avg_vmc = 250,  // Increased significantly for asterix
   .vmc_clip = 1000,
   .min_sleep_len_for_active_pct_check = 39,
+    .min_short_sleep_cycle_len_minutes = 10,
+    .max_fragmented_sleep_gap_minutes = 30,
 };
 #else
 static const KAlgSleepParams KALG_SLEEP_PARAMS = {
@@ -229,6 +253,8 @@ static const KAlgSleepParams KALG_SLEEP_PARAMS = {
   .max_avg_vmc = 180,
   .vmc_clip = 1000,
   .min_sleep_len_for_active_pct_check = 39,
+    .min_short_sleep_cycle_len_minutes = 10,
+    .max_fragmented_sleep_gap_minutes = 30,
 };
 #endif
 
@@ -236,7 +262,6 @@ static const KAlgSleepParams KALG_SLEEP_PARAMS = {
 // ----------------------------------------------------------------------------------------
 // Deep Sleep detection structures
 // State information for deep sleep detection
-#define KALG_MAX_DEEP_SLEEP_SESSIONS 8    // Max number of deep sleep sessions per sleep session
 typedef struct {
   time_t sleep_start_time;              // KALG_START_TIME_NONE if no KAlgDeepSleepAction_Start yet
   time_t deep_start_time;               // start of current deep sleep session
@@ -1686,8 +1711,8 @@ static void prv_deep_sleep_update(KAlgState *alg_state, time_t sample_time, uint
 // @return true if we have enough data to compute the score for this minute
 static bool prv_sleep_activity_update_stats(KAlgState *alg_state, time_t utc_now, uint16_t vmc,
                                             uint8_t orientation, bool definitely_not_worn,
-                                            uint32_t *score_ret, time_t *sample_utc_ret,
-                                            bool *is_sleep_minute_ret) {
+                                            bool sleep_intent_hint, uint32_t *score_ret,
+                                            time_t *sample_utc_ret, bool *is_sleep_minute_ret) {
   // Handy access to some variables
   const KAlgSleepParams *params = &KALG_SLEEP_PARAMS;
   KAlgSleepActivityState *state = &alg_state->sleep_state;
@@ -1703,6 +1728,7 @@ static bool prv_sleep_activity_update_stats(KAlgState *alg_state, time_t utc_now
     .vmc = vmc,
     .orientation = orientation,
     .definitely_not_worn = definitely_not_worn,
+      .sleep_intent_hint = sleep_intent_hint,
   };
 
   // Get the not-worn status
@@ -1718,22 +1744,36 @@ static bool prv_sleep_activity_update_stats(KAlgState *alg_state, time_t utc_now
   time_t sample_utc = utc_now - ((KALG_SLEEP_HALF_WIDTH + 1) * SECONDS_PER_MINUTE);
   uint32_t score = prv_compute_sleep_score(state->minute_history, KALG_SLEEP_HALF_WIDTH);
   bool is_sleep_minute = ((score <= params->max_sleep_minute_score) && !not_worn);
+  sleep_intent_hint = state->minute_history[KALG_SLEEP_HALF_WIDTH].sleep_intent_hint;
 
   // ----------------------------------------------------------------------------------
   // Update stats
   if (is_sleep_minute) {
     state->current_stats.consecutive_sleep_minutes++;
     state->current_stats.consecutive_awake_minutes = 0;
+    state->current_stats.consecutive_sleep_intent_minutes += sleep_intent_hint;
+    state->current_stats.consecutive_awake_intent_minutes = 0;
+    state->current_stats.num_non_zero_awake_tail = 0;
+    state->current_stats.vmc_sum_awake_tail = 0;
   } else {
     state->current_stats.consecutive_sleep_minutes = 0;
     state->current_stats.consecutive_awake_minutes++;
+    state->current_stats.consecutive_sleep_intent_minutes = 0;
+    state->current_stats.consecutive_awake_intent_minutes += sleep_intent_hint;
   }
   if (score > params->min_valid_vmc) {
     // If there is any movememnt at all, increment the "non-zero" minutes count.
     state->current_stats.num_non_zero_minutes++;
+    if (!is_sleep_minute) {
+      state->current_stats.num_non_zero_awake_tail++;
+    }
   }
   if (state->current_stats.start_time != KALG_START_TIME_NONE) {
     state->current_stats.vmc_sum += MIN(params->vmc_clip, vmc);
+    state->current_stats.sleep_intent_minutes += sleep_intent_hint;
+    if (!is_sleep_minute) {
+      state->current_stats.vmc_sum_awake_tail += MIN(params->vmc_clip, vmc);
+    }
   }
 
   state->last_sample_utc = sample_utc;
@@ -1744,7 +1784,6 @@ static bool prv_sleep_activity_update_stats(KAlgState *alg_state, time_t utc_now
   *is_sleep_minute_ret = is_sleep_minute;
   return true;
 }
-
 
 // ------------------------------------------------------------------------------------------
 // See if we should start a new sleep session or end the current one
@@ -1782,6 +1821,10 @@ static void prv_sleep_activity_update_session_state(
         - (state->current_stats.consecutive_sleep_minutes * SECONDS_PER_MINUTE);
       state->current_stats.num_non_zero_minutes = 0;
       state->current_stats.vmc_sum = 0;
+      state->current_stats.sleep_intent_minutes =
+          state->current_stats.consecutive_sleep_intent_minutes;
+      state->current_stats.num_non_zero_awake_tail = 0;
+      state->current_stats.vmc_sum_awake_tail = 0;
 
       KALG_LOG_DEBUG("Detected bedtime at %s", prv_log_time(alg_state,
                                                             state->current_stats.start_time));
@@ -1851,12 +1894,90 @@ static void prv_sleep_activity_update_session_state(
                  state->current_stats.consecutive_awake_minutes, pct_non_zero, avg_vmc);
 }
 
+// ------------------------------------------------------------------------------------------
+static bool prv_cycle_is_adjacent(time_t cycle_start_utc, time_t anchor_end_utc) {
+  const KAlgSleepParams *params = &KALG_SLEEP_PARAMS;
+  return (anchor_end_utc != KALG_START_TIME_NONE) && (cycle_start_utc >= anchor_end_utc) &&
+         (cycle_start_utc <=
+          anchor_end_utc + (params->max_fragmented_sleep_gap_minutes * SECONDS_PER_MINUTE));
+}
+
+// ------------------------------------------------------------------------------------------
+static time_t prv_pending_cycle_end(const KAlgSleepActivityState *state) {
+  return state->pending_cycle.start_utc + (state->pending_cycle.len_m * SECONDS_PER_MINUTE);
+}
+
+// ------------------------------------------------------------------------------------------
+static void prv_register_pending_cycle(KAlgState *alg_state,
+                                       KAlgActivitySessionCallback sessions_cb, void *context) {
+  KAlgSleepActivityState *state = &alg_state->sleep_state;
+  sessions_cb(context, KAlgActivityType_Sleep, state->pending_cycle.start_utc,
+              state->pending_cycle.len_m * SECONDS_PER_MINUTE, false /*ongoing*/, false /*delete*/,
+              0 /*steps*/, 0 /*resting_calories*/, 0 /*active_calories*/, 0 /*distance_mm*/);
+  for (uint8_t i = 0; i < state->pending_cycle.num_deep; i++) {
+    sessions_cb(context, KAlgActivityType_RestfulSleep,
+                state->pending_cycle.start_utc + state->pending_cycle.deep_start_delta_sec[i],
+                state->pending_cycle.deep_len_m[i] * SECONDS_PER_MINUTE, false /*ongoing*/,
+                false /*delete*/, 0 /*steps*/, 0 /*resting_calories*/, 0 /*active_calories*/,
+                0 /*distance_mm*/);
+  }
+  state->confirmed_cycle_end_utc = prv_pending_cycle_end(state);
+  state->pending_cycle = (KAlgPendingSleepCycle){};
+}
+
+// ------------------------------------------------------------------------------------------
+static void prv_stash_pending_cycle(KAlgState *alg_state, time_t sleep_end_time,
+                                    uint16_t session_len_m) {
+  KAlgSleepActivityState *state = &alg_state->sleep_state;
+  KAlgDeepSleepActivityState *deep_state = &alg_state->deep_sleep_state;
+
+  state->pending_cycle = (KAlgPendingSleepCycle){
+      .start_utc = state->current_stats.start_time,
+      .len_m = session_len_m,
+  };
+  for (uint8_t i = 0; i < deep_state->num_sessions; i++) {
+    state->pending_cycle.deep_start_delta_sec[i] = deep_state->start_delta_sec[i];
+    state->pending_cycle.deep_len_m[i] = deep_state->len_m[i];
+    state->pending_cycle.num_deep++;
+  }
+  if ((deep_state->deep_start_time != KALG_START_TIME_NONE) &&
+      (deep_state->deep_start_time < sleep_end_time) &&
+      (state->pending_cycle.num_deep < KALG_MAX_DEEP_SLEEP_SESSIONS)) {
+    const uint8_t index = state->pending_cycle.num_deep++;
+    state->pending_cycle.deep_start_delta_sec[index] =
+        deep_state->deep_start_time - state->pending_cycle.start_utc;
+    state->pending_cycle.deep_len_m[index] =
+        (sleep_end_time - deep_state->deep_start_time) / SECONDS_PER_MINUTE;
+  }
+}
+
+// ------------------------------------------------------------------------------------------
+static bool prv_pending_cycle_is_adjacent(const KAlgSleepActivityState *state,
+                                          time_t cycle_start_utc) {
+  return (state->pending_cycle.start_utc != KALG_START_TIME_NONE) &&
+         prv_cycle_is_adjacent(cycle_start_utc, prv_pending_cycle_end(state));
+}
+
+// ------------------------------------------------------------------------------------------
+static void prv_resolve_pending_cycle(KAlgState *alg_state, bool following_cycle_kept,
+                                      KAlgActivitySessionCallback sessions_cb, void *context) {
+  KAlgSleepActivityState *state = &alg_state->sleep_state;
+  if (state->pending_cycle.start_utc == KALG_START_TIME_NONE) {
+    return;
+  }
+  if (following_cycle_kept &&
+      prv_pending_cycle_is_adjacent(state, state->current_stats.start_time)) {
+    prv_register_pending_cycle(alg_state, sessions_cb, context);
+  } else {
+    state->pending_cycle = (KAlgPendingSleepCycle){};
+  }
+}
 
 // ------------------------------------------------------------------------------------------
 // Process the minute data for sleep detection
 static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint16_t vmc,
                                       uint8_t orientation, bool definitely_not_worn,
-                                      bool shutting_down,
+                                      bool sleep_intent_hint, bool shutting_down,
                                       KAlgActivitySessionCallback sessions_cb, void *context) {
   // Handy access to some variables
   const KAlgSleepParams *params = &KALG_SLEEP_PARAMS;
@@ -1873,8 +1994,8 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
     // essentially run it with old data, but with the added constraint that we are shutting down.
     sample_utc = alg_state->sleep_state.last_sample_utc;
   } else if (!prv_sleep_activity_update_stats(alg_state, utc_now, vmc, orientation,
-                                              definitely_not_worn, &score, &sample_utc,
-                                              &is_sleep_minute)) {
+                                              definitely_not_worn, sleep_intent_hint, &score,
+                                              &sample_utc, &is_sleep_minute)) {
     return;
   }
 
@@ -1905,12 +2026,6 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
     KALG_LOG_DEBUG("Detected wake at %s, cycle_len: %u",  prv_log_time(alg_state, sleep_end_time),
                    session_len_m);
 
-    // Reject if the session is too short
-    if (minutes_since_sleep_started < params->min_sleep_cycle_len_minutes) {
-      reject_session = true;
-      KALG_LOG_DEBUG("Cycle rejected because too short");
-    }
-
     // Reject if we detect the watch was not worn at all during this session
     if (prv_not_worn_during_session(alg_state, state->current_stats.start_time, session_len_m,
                                     false /*ongoing*/)) {
@@ -1918,8 +2033,53 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
       KALG_LOG_DEBUG("Cycle rejected because not worn");
     }
 
-    // If we got a valid sleep cycle, add it to the totals
-    if (!reject_session) {
+    const uint16_t sleep_intent_minutes =
+        state->current_stats.sleep_intent_minutes -
+        MIN(state->current_stats.sleep_intent_minutes,
+            state->current_stats.consecutive_awake_intent_minutes);
+    const bool has_sleep_intent = (session_len_m >= params->min_short_sleep_cycle_len_minutes) &&
+                                  ((sleep_intent_minutes * 2) >= session_len_m);
+    const bool is_long_cycle = (session_len_m >= params->min_sleep_cycle_len_minutes);
+    if (!is_long_cycle && (session_len_m > 0)) {
+      const uint32_t slept_vmc_sum =
+          state->current_stats.vmc_sum -
+          MIN(state->current_stats.vmc_sum, state->current_stats.vmc_sum_awake_tail);
+      const uint16_t slept_non_zero_minutes = state->current_stats.num_non_zero_minutes -
+                                              MIN(state->current_stats.num_non_zero_minutes,
+                                                  state->current_stats.num_non_zero_awake_tail);
+      const uint32_t slept_avg_vmc = slept_vmc_sum / session_len_m;
+      const unsigned slept_pct_non_zero = (slept_non_zero_minutes * 100) / session_len_m;
+      if ((slept_avg_vmc > params->max_avg_vmc) ||
+          (slept_pct_non_zero > params->max_active_minutes_pct)) {
+        reject_session = true;
+        KALG_LOG_DEBUG("Short cycle rejected: avg vmc %" PRIu32 ", non-zero %u pct", slept_avg_vmc,
+                       slept_pct_non_zero);
+      }
+    }
+    const bool follows_pending =
+        prv_pending_cycle_is_adjacent(state, state->current_stats.start_time);
+    const bool follows_confirmed =
+        prv_cycle_is_adjacent(state->current_stats.start_time, state->confirmed_cycle_end_utc);
+    const bool is_fragmented_short_cycle =
+        !is_long_cycle && (session_len_m >= params->min_short_sleep_cycle_len_minutes) &&
+        (follows_pending || (!state->pending_cycle.start_utc && follows_confirmed));
+    const bool keep_current_cycle = !reject_session && (is_long_cycle || has_sleep_intent);
+    const bool hold_back_cycle =
+        !reject_session && !keep_current_cycle && is_fragmented_short_cycle;
+
+    if (!keep_current_cycle && !hold_back_cycle) {
+      reject_session = true;
+      KALG_LOG_DEBUG("Cycle rejected because too short");
+    }
+
+    if (hold_back_cycle) {
+      prv_resolve_pending_cycle(alg_state, true /*following_cycle_kept*/, sessions_cb, context);
+      prv_stash_pending_cycle(alg_state, sleep_end_time, session_len_m);
+      prv_deep_sleep_update(alg_state, sample_utc, score, KAlgDeepSleepAction_Abort,
+                            false /*ok_to_register*/, sessions_cb, context);
+
+    } else if (!reject_session) {
+      prv_resolve_pending_cycle(alg_state, true /*following_cycle_kept*/, sessions_cb, context);
       PBL_LOG_DBG("Detected valid sleep cycle of len %d, starting at %s",
               session_len_m, prv_log_time(alg_state, state->current_stats.start_time));
 
@@ -1936,9 +2096,11 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
         .uncertain_start_utc = 0,
         .sleep_len_m = session_len_m,
       };
+      state->confirmed_cycle_end_utc = sleep_end_time;
 
     } else {
       KALG_LOG_DEBUG("Cycle rejected");
+      prv_resolve_pending_cycle(alg_state, false /*following_cycle_kept*/, sessions_cb, context);
       // Delete the previously registered ongoing session
       sessions_cb(context, KAlgActivityType_Sleep, state->current_stats.start_time,
                   session_len_m * SECONDS_PER_MINUTE, true /*ongoing*/, true /*delete*/,
@@ -1960,6 +2122,8 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
     // Sleep has not ended yet
     if (state->current_stats.start_time != KALG_START_TIME_NONE) {
       if (minutes_since_sleep_started >= params->min_sleep_cycle_len_minutes) {
+        prv_resolve_pending_cycle(alg_state, true /*following_cycle_kept*/, sessions_cb, context);
+
         // Register ongoing sleep if we are in sleep
         sessions_cb(context, KAlgActivityType_Sleep, state->current_stats.start_time,
                     minutes_since_sleep_started * SECONDS_PER_MINUTE, true /*ongoing*/,
@@ -1981,7 +2145,6 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
     }
   }
 }
-
 
 // ------------------------------------------------------------------------------------------
 // Return activity attributes for the given activity
@@ -2118,9 +2281,9 @@ static void prv_step_activity_update(KAlgState *alg_state, KAlgStepActivityState
 // Feed new minute data into the activity detection state machine. This logic looks for non-sleep
 // activities, like walks, runs, etc.
 void kalg_activities_update(KAlgState *state, time_t utc_now, uint16_t steps, uint16_t vmc,
-                            uint8_t orientation, bool definitely_not_worn,
-                            uint32_t resting_calories,
-                            uint32_t active_calories, uint32_t distance_mm, bool shutting_down,
+                            uint8_t orientation, bool definitely_not_worn, bool sleep_intent_hint,
+                            uint32_t resting_calories, uint32_t active_calories,
+                            uint32_t distance_mm, bool shutting_down,
                             KAlgActivitySessionCallback sessions_cb, void *context) {
   // If we've encountered a significant change in UTC time (connecting to a new phone, factory
   // reset, etc.) it could wreak havoc with our activity state machines, so we need to reset
@@ -2145,10 +2308,9 @@ void kalg_activities_update(KAlgState *state, time_t utc_now, uint16_t steps, ui
 
     // Pass onto the sleep detector
     prv_sleep_activity_update(state, utc_now, vmc, orientation, definitely_not_worn,
-                              shutting_down, sessions_cb, context);
+                              sleep_intent_hint, shutting_down, sessions_cb, context);
   }
 }
-
 
 // ---------------------------------------------------------------------------------------
 time_t kalg_activity_last_processed_time(KAlgState *state, KAlgActivityType activity) {
