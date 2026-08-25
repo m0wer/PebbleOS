@@ -386,6 +386,7 @@ typedef struct KAlgState {
   KAlgStepActivityState walk_state;
   KAlgStepActivityState run_state;
   KAlgSleepActivityState sleep_state;
+  KAlgSleepDiagnostics sleep_diagnostics;
   KAlgDeepSleepActivityState deep_sleep_state;
   KAlgNotWornState not_worn_state;
 
@@ -1712,7 +1713,8 @@ static void prv_deep_sleep_update(KAlgState *alg_state, time_t sample_time, uint
 static bool prv_sleep_activity_update_stats(KAlgState *alg_state, time_t utc_now, uint16_t vmc,
                                             uint8_t orientation, bool definitely_not_worn,
                                             bool sleep_intent_hint, uint32_t *score_ret,
-                                            time_t *sample_utc_ret, bool *is_sleep_minute_ret) {
+                                            time_t *sample_utc_ret, bool *is_sleep_minute_ret,
+                                            bool *not_worn_ret) {
   // Handy access to some variables
   const KAlgSleepParams *params = &KALG_SLEEP_PARAMS;
   KAlgSleepActivityState *state = &alg_state->sleep_state;
@@ -1782,6 +1784,7 @@ static bool prv_sleep_activity_update_stats(KAlgState *alg_state, time_t utc_now
   *score_ret = score;
   *sample_utc_ret = sample_utc;
   *is_sleep_minute_ret = is_sleep_minute;
+  *not_worn_ret = not_worn;
   return true;
 }
 
@@ -1791,7 +1794,7 @@ static void prv_sleep_activity_update_session_state(
     KAlgState *alg_state, time_t sample_utc, uint16_t vmc, uint32_t score, bool is_sleep_minute,
     unsigned minutes_since_sleep_started, bool shutting_down,
     KAlgActivitySessionCallback sessions_cb, void *context,
-    time_t *sleep_end_time, bool *reject_session) {
+    time_t *sleep_end_time, bool *reject_session, uint16_t *rejection_flags) {
   // Handy access to some variables
   const KAlgSleepParams *params = &KALG_SLEEP_PARAMS;
   KAlgSleepActivityState *state = &alg_state->sleep_state;
@@ -1807,6 +1810,7 @@ static void prv_sleep_activity_update_session_state(
   // This gets set to true if we decided that the current sleep session we are in is
   // not a valid one.
   *reject_session = false;
+  *rejection_flags = 0;
 
   // This gets set to non-zero if we detected the end of the current sleep session
   *sleep_end_time = KALG_START_TIME_NONE;
@@ -1848,6 +1852,7 @@ static void prv_sleep_activity_update_session_state(
       KALG_LOG_DEBUG("Cycle rejected because of not-worn");
       *sleep_end_time = sample_utc;
       *reject_session = true;
+      *rejection_flags |= KAlgSleepDiagnosticFlag_RejectedNotWorn;
 
     } else if (state->current_stats.consecutive_awake_minutes >= wake_minutes_threshold) {
       // Too many awake minutes in a row
@@ -1870,6 +1875,7 @@ static void prv_sleep_activity_update_session_state(
       // If the percentage of non-zero minutes is too high, reject this cycle.
       *sleep_end_time = sample_utc;
       *reject_session = true;
+      *rejection_flags |= KAlgSleepDiagnosticFlag_RejectedMotionQuality;
       KALG_LOG_DEBUG("Cycle rejected because too many non-zero minutes (%d pct)",
                      pct_non_zero);
 
@@ -1879,6 +1885,7 @@ static void prv_sleep_activity_update_session_state(
       // If the percentage of non-zero minutes is too high, reject this cycle.
       *sleep_end_time = sample_utc;
       *reject_session = true;
+      *rejection_flags |= KAlgSleepDiagnosticFlag_RejectedMotionQuality;
       KALG_LOG_DEBUG("Cycle rejected because avg vmc is too high (%"PRIu16")", avg_vmc);
     } else if (shutting_down) {
       KALG_LOG_DEBUG("Cycle ended because we are shutting down");
@@ -1959,17 +1966,19 @@ static bool prv_pending_cycle_is_adjacent(const KAlgSleepActivityState *state,
 }
 
 // ------------------------------------------------------------------------------------------
-static void prv_resolve_pending_cycle(KAlgState *alg_state, bool following_cycle_kept,
-                                      KAlgActivitySessionCallback sessions_cb, void *context) {
+static uint16_t prv_resolve_pending_cycle(KAlgState *alg_state, bool following_cycle_kept,
+                                          KAlgActivitySessionCallback sessions_cb, void *context) {
   KAlgSleepActivityState *state = &alg_state->sleep_state;
   if (state->pending_cycle.start_utc == KALG_START_TIME_NONE) {
-    return;
+    return 0;
   }
   if (following_cycle_kept &&
       prv_pending_cycle_is_adjacent(state, state->current_stats.start_time)) {
     prv_register_pending_cycle(alg_state, sessions_cb, context);
+    return KAlgSleepDiagnosticFlag_FragmentAccepted;
   } else {
     state->pending_cycle = (KAlgPendingSleepCycle){};
+    return KAlgSleepDiagnosticFlag_FragmentDiscarded;
   }
 }
 
@@ -1987,6 +1996,7 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
   uint32_t score = 0;
   time_t sample_utc = 0;
   bool is_sleep_minute = false;
+  bool not_worn = false;
   if (shutting_down) {
     // Grab the most recent sample_utc we have and run the algorithm again with the added
     // constraint that we are shutting down right now. The reason we save it off and use it is
@@ -1994,9 +2004,20 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
     // essentially run it with old data, but with the added constraint that we are shutting down.
     sample_utc = alg_state->sleep_state.last_sample_utc;
   } else if (!prv_sleep_activity_update_stats(alg_state, utc_now, vmc, orientation,
-                                              definitely_not_worn, sleep_intent_hint, &score,
-                                              &sample_utc, &is_sleep_minute)) {
+                                               definitely_not_worn, sleep_intent_hint, &score,
+                                               &sample_utc, &is_sleep_minute, &not_worn)) {
     return;
+  }
+
+  if (!shutting_down) {
+    alg_state->sleep_diagnostics = (KAlgSleepDiagnostics) {
+      .sample_utc = sample_utc,
+      .score = score,
+      .flags = KAlgSleepDiagnosticFlag_ScoreValid |
+               (definitely_not_worn ? KAlgSleepDiagnosticFlag_DefinitelyNotWornInput : 0) |
+               (not_worn ? KAlgSleepDiagnosticFlag_ComputedNotWorn : 0) |
+               (is_sleep_minute ? KAlgSleepDiagnosticFlag_SleepMinute : 0),
+    };
   }
 
   // How many minutes since sleep started?
@@ -2009,11 +2030,24 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
   // Determine if the current session (if any) should end or if we should start a new one
   // ... Set true if we decided that the current sleep session we are in is not a valid one.
   bool reject_session;
+  uint16_t rejection_flags;
+  const bool session_was_active = (state->current_stats.start_time != KALG_START_TIME_NONE);
   // ... Set non-zero if we detected the end of the current sleep session
   time_t sleep_end_time;
   prv_sleep_activity_update_session_state(alg_state, sample_utc, vmc, score, is_sleep_minute,
                                           minutes_since_sleep_started, shutting_down, sessions_cb,
-                                          context, &sleep_end_time, &reject_session);
+                                          context, &sleep_end_time, &reject_session,
+                                          &rejection_flags);
+
+  if (!shutting_down) {
+    if (session_was_active || state->current_stats.start_time != KALG_START_TIME_NONE) {
+      alg_state->sleep_diagnostics.flags |= KAlgSleepDiagnosticFlag_SessionActive;
+    }
+    if (!session_was_active && state->current_stats.start_time != KALG_START_TIME_NONE) {
+      alg_state->sleep_diagnostics.flags |= KAlgSleepDiagnosticFlag_SessionStarted;
+    }
+    alg_state->sleep_diagnostics.flags |= rejection_flags;
+  }
 
 
   // -------------------------------------------------------------------------------
@@ -2030,6 +2064,7 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
     if (prv_not_worn_during_session(alg_state, state->current_stats.start_time, session_len_m,
                                     false /*ongoing*/)) {
       reject_session = true;
+      rejection_flags |= KAlgSleepDiagnosticFlag_RejectedNotWorn;
       KALG_LOG_DEBUG("Cycle rejected because not worn");
     }
 
@@ -2052,6 +2087,7 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
       if ((slept_avg_vmc > params->max_avg_vmc) ||
           (slept_pct_non_zero > params->max_active_minutes_pct)) {
         reject_session = true;
+        rejection_flags |= KAlgSleepDiagnosticFlag_RejectedMotionQuality;
         KALG_LOG_DEBUG("Short cycle rejected: avg vmc %" PRIu32 ", non-zero %u pct", slept_avg_vmc,
                        slept_pct_non_zero);
       }
@@ -2069,17 +2105,35 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
 
     if (!keep_current_cycle && !hold_back_cycle) {
       reject_session = true;
+      if (rejection_flags == 0) {
+        rejection_flags |= KAlgSleepDiagnosticFlag_RejectedTooShort;
+      }
       KALG_LOG_DEBUG("Cycle rejected because too short");
     }
 
+    if (!shutting_down) {
+      alg_state->sleep_diagnostics.flags |= KAlgSleepDiagnosticFlag_SessionEnded | rejection_flags;
+    }
+
     if (hold_back_cycle) {
-      prv_resolve_pending_cycle(alg_state, true /*following_cycle_kept*/, sessions_cb, context);
+      if (!shutting_down) {
+        alg_state->sleep_diagnostics.flags |= KAlgSleepDiagnosticFlag_FragmentHeld;
+      }
+      const uint16_t pending_flags =
+          prv_resolve_pending_cycle(alg_state, true /*following_cycle_kept*/, sessions_cb, context);
+      if (!shutting_down) {
+        alg_state->sleep_diagnostics.flags |= pending_flags;
+      }
       prv_stash_pending_cycle(alg_state, sleep_end_time, session_len_m);
       prv_deep_sleep_update(alg_state, sample_utc, score, KAlgDeepSleepAction_Abort,
                             false /*ok_to_register*/, sessions_cb, context);
 
     } else if (!reject_session) {
-      prv_resolve_pending_cycle(alg_state, true /*following_cycle_kept*/, sessions_cb, context);
+      const uint16_t pending_flags =
+          prv_resolve_pending_cycle(alg_state, true /*following_cycle_kept*/, sessions_cb, context);
+      if (!shutting_down) {
+        alg_state->sleep_diagnostics.flags |= KAlgSleepDiagnosticFlag_SessionAccepted | pending_flags;
+      }
       PBL_LOG_DBG("Detected valid sleep cycle of len %d, starting at %s",
               session_len_m, prv_log_time(alg_state, state->current_stats.start_time));
 
@@ -2099,8 +2153,15 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
       state->confirmed_cycle_end_utc = sleep_end_time;
 
     } else {
+      if (!shutting_down) {
+        alg_state->sleep_diagnostics.flags |= KAlgSleepDiagnosticFlag_SessionRejected;
+      }
       KALG_LOG_DEBUG("Cycle rejected");
-      prv_resolve_pending_cycle(alg_state, false /*following_cycle_kept*/, sessions_cb, context);
+      const uint16_t pending_flags =
+          prv_resolve_pending_cycle(alg_state, false /*following_cycle_kept*/, sessions_cb, context);
+      if (!shutting_down) {
+        alg_state->sleep_diagnostics.flags |= pending_flags;
+      }
       // Delete the previously registered ongoing session
       sessions_cb(context, KAlgActivityType_Sleep, state->current_stats.start_time,
                   session_len_m * SECONDS_PER_MINUTE, true /*ongoing*/, true /*delete*/,
@@ -2122,7 +2183,11 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
     // Sleep has not ended yet
     if (state->current_stats.start_time != KALG_START_TIME_NONE) {
       if (minutes_since_sleep_started >= params->min_sleep_cycle_len_minutes) {
-        prv_resolve_pending_cycle(alg_state, true /*following_cycle_kept*/, sessions_cb, context);
+        const uint16_t pending_flags =
+            prv_resolve_pending_cycle(alg_state, true /*following_cycle_kept*/, sessions_cb, context);
+        if (!shutting_down) {
+          alg_state->sleep_diagnostics.flags |= pending_flags;
+        }
 
         // Register ongoing sleep if we are in sleep
         sessions_cb(context, KAlgActivityType_Sleep, state->current_stats.start_time,
@@ -2285,6 +2350,8 @@ void kalg_activities_update(KAlgState *state, time_t utc_now, uint16_t steps, ui
                             uint32_t resting_calories, uint32_t active_calories,
                             uint32_t distance_mm, bool shutting_down,
                             KAlgActivitySessionCallback sessions_cb, void *context) {
+  state->sleep_diagnostics = (KAlgSleepDiagnostics) {};
+
   // If we've encountered a significant change in UTC time (connecting to a new phone, factory
   // reset, etc.) it could wreak havoc with our activity state machines, so we need to reset
   // state
@@ -2310,6 +2377,11 @@ void kalg_activities_update(KAlgState *state, time_t utc_now, uint16_t steps, ui
     prv_sleep_activity_update(state, utc_now, vmc, orientation, definitely_not_worn,
                               sleep_intent_hint, shutting_down, sessions_cb, context);
   }
+}
+
+// ---------------------------------------------------------------------------------------
+void kalg_get_sleep_diagnostics(const KAlgState *state, KAlgSleepDiagnostics *diagnostics) {
+  *diagnostics = state->sleep_diagnostics;
 }
 
 // ---------------------------------------------------------------------------------------

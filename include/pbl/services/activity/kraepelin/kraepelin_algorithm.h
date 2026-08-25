@@ -14,6 +14,32 @@
 
 typedef struct KAlgState KAlgState;
 
+// Input flags describe the update that produced the centered score, not sensor state at sample_utc.
+typedef enum {
+  KAlgSleepDiagnosticFlag_ScoreValid = (1 << 0),
+  KAlgSleepDiagnosticFlag_DefinitelyNotWornInput = (1 << 1),
+  KAlgSleepDiagnosticFlag_ComputedNotWorn = (1 << 2),
+  KAlgSleepDiagnosticFlag_SleepMinute = (1 << 3),
+  KAlgSleepDiagnosticFlag_SessionActive = (1 << 4),
+  KAlgSleepDiagnosticFlag_SessionStarted = (1 << 5),
+  KAlgSleepDiagnosticFlag_SessionEnded = (1 << 6),
+  KAlgSleepDiagnosticFlag_SessionAccepted = (1 << 7),
+  KAlgSleepDiagnosticFlag_SessionRejected = (1 << 8),
+  KAlgSleepDiagnosticFlag_RejectedNotWorn = (1 << 9),
+  KAlgSleepDiagnosticFlag_RejectedMotionQuality = (1 << 10),
+  KAlgSleepDiagnosticFlag_RejectedTooShort = (1 << 11),
+  KAlgSleepDiagnosticFlag_FragmentHeld = (1 << 12),
+  KAlgSleepDiagnosticFlag_FragmentDiscarded = (1 << 13),
+  KAlgSleepDiagnosticFlag_FragmentAccepted = (1 << 14),
+  KAlgSleepDiagnosticFlag_HrmOffWristInput = (1 << 15),
+} KAlgSleepDiagnosticFlags;
+
+typedef struct {
+  time_t sample_utc;
+  uint32_t score;
+  uint16_t flags;
+} KAlgSleepDiagnostics;
+
 // This value in the encoded_vmc field of a KalgSleepMinute structure indicates that the
 // watch was not worn
 #define KALG_ENCODED_VMC_NOT_WORN 0
@@ -145,6 +171,10 @@ void kalg_activities_update(KAlgState *state, time_t utc_now, uint16_t steps, ui
                             uint32_t resting_calories, uint32_t active_calories,
                             uint32_t distance_mm, bool shutting_down,
                             KAlgActivitySessionCallback sessions_cb, void *context);
+
+// Get diagnostics for the most recent activity update. ScoreValid is set only for a normally
+// scored center minute.
+void kalg_get_sleep_diagnostics(const KAlgState *state, KAlgSleepDiagnostics *diagnostics);
 
 // Return the timestamp of the last minute that was processed for the given activity type
 // @param[in] state the state structure passed into kalg_init
