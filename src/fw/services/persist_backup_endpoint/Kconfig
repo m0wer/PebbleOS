@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 Core Devices LLC
+# SPDX-License-Identifier: Apache-2.0
+
+config SERVICE_PERSIST_BACKUP_ENDPOINT
+    bool "Persist backup endpoint"
+    depends on SERVICE_PERSIST && SERVICE_COMM_SESSION && SERVICE_NEW_TIMER && SERVICE_PROCESS_MANAGEMENT
+    help
+      Watch-authorized app persist backup endpoint.

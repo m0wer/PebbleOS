@@ -149,3 +149,12 @@ void test_session_remote_version__app_session(void) {
   cl_assert_equal_i(fake_event_get_count(), 0);
   cl_assert_equal_i(s_capability_flags, s_expected_capabilities);
 }
+
+void test_session_remote_version__watch_app_data_backup_capability_layout(void) {
+  PebbleProtocolCapabilities capabilities = {
+      .watch_app_data_backup_support = true,
+  };
+
+  cl_assert_equal_i((uint32_t)capabilities.flags, 1u << 25);
+  cl_assert_equal_i(capabilities.flags >> 32, 0);
+}

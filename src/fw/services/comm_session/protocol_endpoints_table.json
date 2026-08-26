@@ -46,6 +46,7 @@
     [ 6001,  "0x1771", "private", "app_fetch_protocol_msg_callback", null, null ],
     [ 6778,  "0x1a7a", "private", "data_logging_protocol_msg_callback", null, null ],
     [ 8000,  "0x1f40", "private", "screenshot_protocol_msg_callback", null, null ],
+    [ 9001,  "0x2329", "private", "persist_backup_endpoint_protocol_msg_callback", null, null ],
     [ 10000, "0x2710", "private", "audio_endpoint_protocol_msg_callback", null, null ],
     [ 11000, "0x2af8", "private", "voice_endpoint_protocol_msg_callback", null, null ],
     [ 11440, "0x2cb0", "private", "timeline_action_endpoint_protocol_msg_callback", null, null ],
