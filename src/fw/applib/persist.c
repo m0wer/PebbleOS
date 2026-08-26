@@ -98,12 +98,18 @@ int persist_read_string__deprecated(const uint32_t key, const size_t buffer_size
 DEFINE_SYSCALL(status_t, persist_write_bool, const uint32_t key, const bool value) {
   LOCK_AND_GET_STORE(store);
   status_t result = settings_file_set(store, &key, sizeof(key), &value, sizeof(value));
+  if (PASSED(result)) {
+    persist_service_store_did_change(store);
+  }
   return PASSED(result) ? (status_t)sizeof(value) : result;
 }
 
 DEFINE_SYSCALL(status_t, persist_write_int, const uint32_t key, const int32_t value) {
   LOCK_AND_GET_STORE(store);
   status_t result = settings_file_set(store, &key, sizeof(key), &value, sizeof(value));
+  if (PASSED(result)) {
+    persist_service_store_did_change(store);
+  }
   return PASSED(result) ? (status_t)sizeof(value) : result;
 }
 
@@ -116,6 +122,9 @@ DEFINE_SYSCALL(int, persist_write_data, const uint32_t key, const void *buffer,
   const size_t restricted_size = MIN(buffer_size, PERSIST_DATA_MAX_LENGTH);
   LOCK_AND_GET_STORE(store);
   int result = settings_file_set(store, &key, sizeof(key), buffer, restricted_size);
+  if (PASSED(result)) {
+    persist_service_store_did_change(store);
+  }
   return PASSED(result) ? (int)restricted_size : result;
 }
 
@@ -141,6 +150,7 @@ DEFINE_SYSCALL(status_t, persist_delete, const uint32_t key) {
   if (settings_file_exists(store, &key, sizeof(key))) {
     result = settings_file_delete(store, &key, sizeof(key));
     if (PASSED(result)) {
+      persist_service_store_did_change(store);
       result = S_TRUE;
     }
   } else {
