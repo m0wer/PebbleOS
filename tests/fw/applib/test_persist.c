@@ -12,6 +12,8 @@
 #include "process_management/pebble_process_md.h"
 #include "pbl/services/filesystem/pfs.h"
 #include "pbl/services/persist.h"
+#include "pbl/services/settings/settings_file.h"
+#include "pbl/util/crc32.h"
 #include <pbl/logging/logging.h>
 #include "pbl/util/attributes.h"
 
@@ -55,6 +57,44 @@ static const Uuid test_uuid_b = { 0xC3, 0x0D, 0xBA, 0xF1, 0x5F, 0x6F, 0x4F, 0x22
 
 static const int test_uuid_c_id = 3;
 static const Uuid test_uuid_c = { 0x1D, 0x6C, 0x7F, 0x01, 0xD9, 0x48, 0x42, 0xA6, 0xAA, 0x4E, 0xB2, 0x08, 0x42, 0x10, 0xEB, 0xBC };
+
+static uint32_t prv_backup_crc_record(uint32_t crc, uint32_t key, const uint8_t *value,
+                                      size_t value_len) {
+  const uint8_t header[] = {
+      (uint8_t)(key >> 24), (uint8_t)(key >> 16),      (uint8_t)(key >> 8),
+      (uint8_t)key,         (uint8_t)(value_len >> 8), (uint8_t)value_len,
+  };
+  return crc32(crc32(crc, header, sizeof(header)), value, value_len);
+}
+
+typedef struct {
+  uint32_t count;
+  uint32_t key;
+  uint8_t value[PERSIST_BACKUP_VALUE_MAX_LENGTH];
+  size_t value_len;
+} BackupRecordCollector;
+
+typedef struct {
+  uint32_t count;
+  Uuid uuid;
+} BackupInventoryCollector;
+
+static bool prv_collect_backup_record(uint32_t key, const uint8_t *value, size_t value_len,
+                                      void *context) {
+  BackupRecordCollector *collector = context;
+  collector->count++;
+  collector->key = key;
+  collector->value_len = value_len;
+  memcpy(collector->value, value, value_len);
+  return true;
+}
+
+static bool prv_collect_backup_inventory(const Uuid *uuid, void *context) {
+  BackupInventoryCollector *collector = context;
+  collector->count++;
+  collector->uuid = *uuid;
+  return true;
+}
 
 static PebbleProcessMd __pbl_app_info = {
   .uuid = TEST_UUID_A,
@@ -341,4 +381,147 @@ void test_persist__legacy_migration(void) {
   // The legacy file and the pmap are gone.
   cl_assert(pfs_open(legacy_name, OP_FLAG_READ, 0, 0) < 0);
   cl_assert(pfs_open("pmap", OP_FLAG_READ, 0, 0) < 0);
+}
+
+void test_persist__backup_export_generation_invalidation(void) {
+  cl_must_pass(persist_write_int(1, 11));
+  cl_must_pass(persist_write_int(2, 22));
+
+  PersistBackupExport *export;
+  cl_must_pass(persist_backup_export_open(&test_uuid_a, &export));
+  BackupRecordCollector collector = {};
+  bool done;
+  cl_must_pass(persist_backup_export_page(export, 1, prv_collect_backup_record, &collector, &done));
+  cl_assert_equal_i(collector.count, 1);
+
+  cl_must_pass(persist_write_int(3, 33));
+  cl_assert_equal_i(
+      persist_backup_export_page(export, 1, prv_collect_backup_record, &collector, &done), E_AGAIN);
+  persist_backup_export_close(export);
+}
+
+void test_persist__backup_inventory_filters_and_parses_uuids(void) {
+  cl_must_pass(persist_write_int(1, 1));
+  prv_write_raw_file("ps123", "x", 1);
+  prv_write_raw_file("ps2ff7fa0460114a988a3ba826a4b899fF", "x", 1);
+
+  BackupInventoryCollector collector = {};
+  const uint32_t generation = persist_backup_inventory_get_generation();
+  cl_assert(generation > 0);
+  cl_must_pass(persist_backup_inventory_each(prv_collect_backup_inventory, &collector));
+  cl_assert_equal_i(collector.count, 1);
+  cl_assert(uuid_equal(&collector.uuid, &test_uuid_a));
+}
+
+void test_persist__backup_import_successful_absent_store(void) {
+  const uint32_t key = 0x01020304;
+  const uint8_t value[] = {0x12, 0x34, 0x56};
+  const uint32_t crc = prv_backup_crc_record(CRC32_INIT, key, value, sizeof(value));
+  PersistBackupImport *import;
+  cl_must_pass(persist_backup_import_begin(&test_uuid_b, 1, sizeof(value), crc, &import));
+  cl_must_pass(persist_backup_import_put(import, key, value, sizeof(value)));
+  cl_must_pass(persist_backup_import_commit(import));
+
+  PersistBackupExport *export;
+  cl_must_pass(persist_backup_export_open(&test_uuid_b, &export));
+  BackupRecordCollector collector = {};
+  bool done;
+  cl_must_pass(persist_backup_export_page(export, 4, prv_collect_backup_record, &collector, &done));
+  cl_assert(done);
+  cl_assert_equal_i(collector.count, 1);
+  cl_assert_equal_i(collector.key, key);
+  cl_assert_equal_i(collector.value_len, sizeof(value));
+  cl_assert_equal_m(collector.value, value, sizeof(value));
+  persist_backup_export_close(export);
+}
+
+void test_persist__backup_import_rejects_invalid_records(void) {
+  const uint8_t value[] = {1};
+  PersistBackupImport *import;
+
+  cl_must_pass(persist_backup_import_begin(&test_uuid_b, 2, 2, 0, &import));
+  cl_must_pass(persist_backup_import_put(import, 1, value, sizeof(value)));
+  cl_assert_equal_i(persist_backup_import_put(import, 1, value, sizeof(value)), E_INVALID_ARGUMENT);
+  persist_backup_import_abort(import);
+
+  uint8_t oversized[PERSIST_BACKUP_VALUE_MAX_LENGTH + 1] = {};
+  cl_must_pass(persist_backup_import_begin(&test_uuid_b, 1, sizeof(oversized), 0, &import));
+  cl_assert_equal_i(persist_backup_import_put(import, 1, oversized, sizeof(oversized)),
+                    E_INVALID_ARGUMENT);
+  persist_backup_import_abort(import);
+
+  cl_must_pass(persist_backup_import_begin(&test_uuid_b, 1, 0, 0, &import));
+  cl_assert_equal_i(persist_backup_import_put(import, 1, value, 0), E_INVALID_ARGUMENT);
+  persist_backup_import_abort(import);
+
+  cl_must_pass(persist_backup_import_begin(&test_uuid_b, 1, 1, 0, &import));
+  cl_must_pass(persist_backup_import_put(import, 1, value, sizeof(value)));
+  cl_assert_equal_i(persist_backup_import_put(import, 2, value, sizeof(value)), E_INVALID_ARGUMENT);
+  persist_backup_import_abort(import);
+
+  cl_must_pass(persist_backup_import_begin(&test_uuid_b, 1, 1, 0, &import));
+  cl_must_pass(persist_backup_import_put(import, 1, value, sizeof(value)));
+  cl_assert_equal_i(persist_backup_import_commit(import), E_ERROR);
+  persist_backup_import_abort(import);
+
+  char filename[2 + 32 + 1];
+  prv_uuid_file_name(filename, &test_uuid_c);
+  prv_write_raw_file(filename, "existing", sizeof("existing"));
+  cl_assert_equal_i(persist_backup_import_begin(&test_uuid_c, 0, 0, CRC32_INIT, &import), E_BUSY);
+}
+
+void test_persist__backup_import_abort_and_boot_cleanup(void) {
+  const uint8_t value[] = {9};
+  const uint32_t crc = prv_backup_crc_record(CRC32_INIT, 1, value, sizeof(value));
+  PersistBackupImport *import;
+  char filename[2 + 32 + 1];
+  prv_uuid_file_name(filename, &test_uuid_b);
+
+  cl_must_pass(persist_backup_import_begin(&test_uuid_b, 1, 1, crc, &import));
+  cl_must_pass(persist_backup_import_put(import, 1, value, sizeof(value)));
+  persist_backup_import_abort(import);
+  cl_assert_equal_i(pfs_open(filename, OP_FLAG_READ, 0, 0), E_DOES_NOT_EXIST);
+  cl_assert_equal_i(pfs_open("psrb", OP_FLAG_READ, 0, 0), E_DOES_NOT_EXIST);
+
+  cl_must_pass(persist_backup_import_begin(&test_uuid_b, 1, 1, crc, &import));
+  cl_must_pass(persist_backup_import_put(import, 1, value, sizeof(value)));
+  persist_backup_import_test_interrupt(import);
+  persist_service_test_recover_interrupted_import();
+  cl_assert_equal_i(pfs_open(filename, OP_FLAG_READ, 0, 0), E_DOES_NOT_EXIST);
+  cl_assert_equal_i(pfs_open("psrb", OP_FLAG_READ, 0, 0), E_DOES_NOT_EXIST);
+}
+
+void test_persist__backup_export_rejects_malformed_record(void) {
+  char filename[2 + 32 + 1];
+  prv_uuid_file_name(filename, &test_uuid_b);
+  SettingsFile file;
+  const uint8_t value[] = {1};
+  cl_must_pass(settings_file_open_growable(&file, filename, persist_service_get_max_size(), 4096));
+  cl_must_pass(settings_file_set(&file, "bad", 3, value, sizeof(value)));
+  settings_file_close(&file);
+
+  PersistBackupExport *export;
+  cl_must_pass(persist_backup_export_open(&test_uuid_b, &export));
+  BackupRecordCollector collector = {};
+  bool done;
+  cl_assert_equal_i(
+      persist_backup_export_page(export, 1, prv_collect_backup_record, &collector, &done), E_ERROR);
+  cl_assert_equal_i(collector.count, 0);
+  cl_assert_equal_i(
+      persist_backup_export_page(export, 1, prv_collect_backup_record, &collector, &done), E_ERROR);
+  persist_backup_export_close(export);
+}
+
+void test_persist__backup_export_pins_file_deletion(void) {
+  char filename[2 + 32 + 1];
+  prv_uuid_file_name(filename, &test_uuid_b);
+  SettingsFile file;
+  cl_must_pass(settings_file_open_growable(&file, filename, persist_service_get_max_size(), 4096));
+  settings_file_close(&file);
+
+  PersistBackupExport *export;
+  cl_must_pass(persist_backup_export_open(&test_uuid_b, &export));
+  cl_assert_equal_i(persist_service_delete_file(&test_uuid_b), E_BUSY);
+  persist_backup_export_close(export);
+  cl_must_pass(persist_service_delete_file(&test_uuid_b));
 }

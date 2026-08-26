@@ -157,16 +157,30 @@ typedef struct {
 //! The bool returned is used to control the iteration.
 //! - If a callback returns true, the iteration continues
 //! - If a callback returns false, the ieration stops.
-typedef bool (*SettingsFileEachCallback)(SettingsFile *file,
-                                         SettingsRecordInfo *info,
+typedef bool (*SettingsFileEachCallback)(SettingsFile *file, SettingsRecordInfo *info,
                                          void *context);
 //! Calls cb for each and every entry within the given file.
 //! Note that you cannot modify the settings file while iterating. If you want
 //! to do this, try settings_file_rewrite instead. (you can read other entries
 //! without fault).
-status_t settings_file_each(SettingsFile *file, SettingsFileEachCallback cb,
-                            void *context);
+status_t settings_file_each(SettingsFile *file, SettingsFileEachCallback cb, void *context);
 
+//! Result returned by a cursor iteration callback.
+typedef enum {
+  SettingsFileEachCursorResult_ConsumedAndContinue,
+  SettingsFileEachCursorResult_ConsumedAndStop,
+  SettingsFileEachCursorResult_NotConsumedAndStop,
+} SettingsFileEachCursorResult;
+
+typedef SettingsFileEachCursorResult (*SettingsFileEachCursorCallback)(SettingsFile *file,
+                                                                       SettingsRecordInfo *info,
+                                                                       void *context);
+
+//! Iterate from a physical cursor. A cursor of zero starts at the first record.
+//! The returned cursor resumes at the first record not consumed by cb.
+status_t settings_file_each_cursor(SettingsFile *file, uint32_t cursor,
+                                   SettingsFileEachCursorCallback cb, void *context,
+                                   uint32_t *next_cursor_out, bool *done_out);
 
 typedef void (*SettingsFileRewriteCallback)(SettingsFile *old_file,
                                             SettingsFile *new_file,
