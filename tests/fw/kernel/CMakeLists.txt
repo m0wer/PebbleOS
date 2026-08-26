@@ -12,3 +12,9 @@ pbl_clar_test(test_remote_input
     src/fw/kernel/remote_input.c
   DEFINES CONFIG_SERVICE_TOUCH
 )
+
+pbl_clar_test(test_notification_double_flick
+  SOURCES
+    src/fw/kernel/notification_double_flick.c
+    lib/util/uuid.c
+)
