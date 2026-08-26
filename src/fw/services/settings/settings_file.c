@@ -651,6 +651,7 @@ static void prv_get_val(SettingsFile *file, void *val, size_t val_len) {
   settings_raw_iter_read_val(&file->iter, val, val_len);
 }
 
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
 typedef struct {
   SettingsFileEachCallback callback;
   void *context;
@@ -729,6 +730,36 @@ status_t settings_file_each_cursor(SettingsFile *file, uint32_t cursor,
 
   return S_SUCCESS;
 }
+#else
+status_t settings_file_each(SettingsFile *file, SettingsFileEachCallback cb, void *context) {
+  // Cannot set keys while iterating
+  PBL_ASSERTN(file->cur_record_pos == 0);
+  SettingsRecordInfo info;
+  for (settings_raw_iter_begin(&file->iter); !settings_raw_iter_end(&file->iter);
+       settings_raw_iter_next(&file->iter)) {
+    if (overwritten(&file->iter.hdr) || deleted_and_expired(&file->iter.hdr)) {
+      continue;
+    }
+    info = (SettingsRecordInfo) {
+      .last_modified = file->iter.hdr.last_modified,
+      .get_key = prv_get_key,
+      .key_len = file->iter.hdr.key_len,
+      .get_val = prv_get_val,
+      .val_len = file->iter.hdr.val_len,
+      .dirty = !flag_is_set(&file->iter.hdr, SETTINGS_FLAG_SYNCED),
+    };
+    file->cur_record_pos = settings_raw_iter_get_current_record_pos(&file->iter);
+    // If the callback returns false, stop iterating.
+    if (!cb(file, &info, context)) {
+      break;
+    }
+    settings_raw_iter_set_current_record_pos(&file->iter, file->cur_record_pos);
+  }
+
+  file->cur_record_pos = 0;
+  return S_SUCCESS;
+}
+#endif
 
 typedef struct {
   SettingsFileRewriteCallback cb;

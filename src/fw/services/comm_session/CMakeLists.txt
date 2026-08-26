@@ -9,11 +9,16 @@ if(CONFIG_RECOVERY_FW)
 else()
   set(recovery "")
 endif()
+if(NOT CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT)
+  set(excluded_endpoints --exclude 9001)
+else()
+  set(excluded_endpoints "")
+endif()
 add_custom_command(
   OUTPUT ${endpoints}
   COMMAND ${PBL_TOOLCHAIN_ENV} ${PYTHON_EXECUTABLE} ${PBL_BASE}/tools/cmake/generate.py endpoints-table
           --input ${CMAKE_CURRENT_SOURCE_DIR}/protocol_endpoints_table.json
-          --output ${endpoints} ${recovery}
+          --output ${endpoints} ${recovery} ${excluded_endpoints}
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/protocol_endpoints_table.json
   WORKING_DIRECTORY ${PBL_BASE}
   COMMENT "Generating the protocol endpoint table"

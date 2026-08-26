@@ -22,6 +22,7 @@
 #include "system/status_codes.h"
 
 typedef struct SettingsFile SettingsFile;
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
 typedef struct PersistBackupExport PersistBackupExport;
 typedef struct PersistBackupImport PersistBackupImport;
 
@@ -33,6 +34,7 @@ typedef bool (*PersistBackupInventoryCallback)(const Uuid *uuid, void *context);
 //! Called for each exported record while the persist service lock is held.
 typedef bool (*PersistBackupRecordCallback)(uint32_t key, const uint8_t *value, size_t value_len,
                                             void *context);
+#endif
 
 //! Initialize the persist service.
 void persist_service_init(void);
@@ -55,9 +57,9 @@ void persist_service_client_close(const Uuid *uuid);
 //! Deletes the app's persist file.
 status_t persist_service_delete_file(const Uuid *uuid);
 
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
 //! Notify the service of a successful app persist mutation while its lock is held.
 void persist_service_store_did_change(SettingsFile *store);
-
 //! Get the generation that changes when a persist file is created or deleted.
 uint32_t persist_backup_inventory_get_generation(void);
 //! Enumerate valid persist filenames. callback must be non-NULL and executes while locked.
@@ -92,4 +94,5 @@ void persist_backup_import_abort(PersistBackupImport *import);
 void persist_backup_import_test_interrupt(PersistBackupImport *import);
 //! Run the same rollback recovery path used during service initialization.
 void persist_service_test_recover_interrupted_import(void);
+#endif
 #endif

@@ -17,6 +17,6 @@ pbl_clar_test(test_settings_file
     src/fw/services/settings/settings_raw_iter.c
     src/fw/util/rand/rand.c
     third_party/tinymt/TinyMT/tinymt/tinymt32.c
-  DEFINES DUMA_DISABLED
+  DEFINES DUMA_DISABLED CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
   OVERRIDES dummy_board
 )

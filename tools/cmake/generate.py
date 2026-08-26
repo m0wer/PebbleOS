@@ -179,6 +179,7 @@ def cmd_endpoints_table(args):
     endpoints = list(definition["prf_and_normal_fw"])
     if not args.recovery:
         endpoints.extend(definition["normal_fw_only"])
+    endpoints = [endpoint for endpoint in endpoints if endpoint[0] not in args.exclude]
     endpoints.sort()
 
     def get_access_enum(access_str):
@@ -359,6 +360,7 @@ def main():
     p.add_argument("--input", required=True)
     p.add_argument("--output", required=True)
     p.add_argument("--recovery", action="store_true")
+    p.add_argument("--exclude", action="append", default=[], type=int)
     p.set_defaults(func=cmd_endpoints_table)
 
     p = sub.add_parser("applib-malloc")
