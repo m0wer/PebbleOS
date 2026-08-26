@@ -554,6 +554,48 @@ void test_settings_file__each_quit_early(void) {
   cl_assert_equal_i(STOPPING_NUM, cur_val);
 }
 
+typedef struct {
+  uint8_t counts[5];
+  uint8_t page_count;
+} CursorTestContext;
+
+static SettingsFileEachCursorResult prv_cursor_cb(SettingsFile *file, SettingsRecordInfo *info,
+                                                  void *context) {
+  CursorTestContext *cursor_context = context;
+  uint32_t key;
+  info->get_key(file, &key, sizeof(key));
+  cl_assert(key < 5);
+  cursor_context->counts[key]++;
+  return ++cursor_context->page_count == 2 ? SettingsFileEachCursorResult_ConsumedAndStop
+                                           : SettingsFileEachCursorResult_ConsumedAndContinue;
+}
+
+void test_settings_file__cursor_pagination(void) {
+  SettingsFile file;
+  cl_must_pass(settings_file_open(&file, "test_file_cursor", 4096));
+  for (uint32_t key = 0; key < 5; ++key) {
+    cl_must_pass(settings_file_set(&file, &key, sizeof(key), &key, sizeof(key)));
+  }
+  const uint32_t replacement = 42;
+  cl_must_pass(settings_file_set(&file, &(uint32_t){2}, sizeof(uint32_t), &replacement,
+                                 sizeof(replacement)));
+  cl_must_pass(settings_file_delete(&file, &(uint32_t){3}, sizeof(uint32_t)));
+
+  CursorTestContext context = {};
+  uint32_t cursor = 0;
+  bool done = false;
+  while (!done) {
+    context.page_count = 0;
+    cl_must_pass(settings_file_each_cursor(&file, cursor, prv_cursor_cb, &context, &cursor, &done));
+  }
+  cl_assert_equal_i(context.counts[0], 1);
+  cl_assert_equal_i(context.counts[1], 1);
+  cl_assert_equal_i(context.counts[2], 1);
+  cl_assert_equal_i(context.counts[3], 0);
+  cl_assert_equal_i(context.counts[4], 1);
+  cl_assert_equal_i(file.cur_record_pos, 0);
+}
+
 void test_settings_file__in_place(void) {
   printf("Testing that we can update a setting file in place\n");
 

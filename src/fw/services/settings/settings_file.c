@@ -650,14 +650,45 @@ static void prv_get_val(SettingsFile *file, void *val, size_t val_len) {
   settings_raw_iter_set_current_record_pos(&file->iter, file->cur_record_pos);
   settings_raw_iter_read_val(&file->iter, val, val_len);
 }
-status_t settings_file_each(SettingsFile *file, SettingsFileEachCallback cb,
-                            void *context) {
+
+typedef struct {
+  SettingsFileEachCallback callback;
+  void *context;
+} EachContext;
+
+static SettingsFileEachCursorResult prv_each_cursor_cb(SettingsFile *file, SettingsRecordInfo *info,
+                                                       void *context) {
+  EachContext *each_context = context;
+  return each_context->callback(file, info, each_context->context)
+             ? SettingsFileEachCursorResult_ConsumedAndContinue
+             : SettingsFileEachCursorResult_ConsumedAndStop;
+}
+
+status_t settings_file_each(SettingsFile *file, SettingsFileEachCallback cb, void *context) {
+  EachContext each_context = {
+      .callback = cb,
+      .context = context,
+  };
+  uint32_t next_cursor;
+  bool done;
+  return settings_file_each_cursor(file, 0, prv_each_cursor_cb, &each_context, &next_cursor, &done);
+}
+
+status_t settings_file_each_cursor(SettingsFile *file, uint32_t cursor,
+                                   SettingsFileEachCursorCallback cb, void *context,
+                                   uint32_t *next_cursor_out, bool *done_out) {
   // Cannot set keys while iterating
   PBL_ASSERTN(file->cur_record_pos == 0);
+  PBL_ASSERTN(next_cursor_out && done_out);
   SettingsRecordInfo info;
-  for (settings_raw_iter_begin(&file->iter); !settings_raw_iter_end(&file->iter);
-      settings_raw_iter_next(&file->iter)) {
+  if (cursor == 0) {
+    settings_raw_iter_begin(&file->iter);
+  } else {
+    settings_raw_iter_set_current_record_pos(&file->iter, cursor);
+  }
+  while (!settings_raw_iter_end(&file->iter)) {
     if (overwritten(&file->iter.hdr) || deleted_and_expired(&file->iter.hdr)) {
+      settings_raw_iter_next(&file->iter);
       continue;
     }
     info = (SettingsRecordInfo) {
@@ -669,14 +700,32 @@ status_t settings_file_each(SettingsFile *file, SettingsFileEachCallback cb,
       .dirty = !flag_is_set(&file->iter.hdr, SETTINGS_FLAG_SYNCED),
     };
     file->cur_record_pos = settings_raw_iter_get_current_record_pos(&file->iter);
-    // if the callback returns false, stop iterating.
-    if (!cb(file, &info, context)) {
+    const SettingsFileEachCursorResult result = cb(file, &info, context);
+    settings_raw_iter_set_current_record_pos(&file->iter, file->cur_record_pos);
+    if (result == SettingsFileEachCursorResult_NotConsumedAndStop) {
+      *next_cursor_out = file->cur_record_pos;
+      *done_out = false;
       break;
     }
-    settings_raw_iter_set_current_record_pos(&file->iter, file->cur_record_pos);
+    settings_raw_iter_next(&file->iter);
+    if (settings_raw_iter_end(&file->iter)) {
+      *next_cursor_out = 0;
+      *done_out = true;
+    } else {
+      *next_cursor_out = settings_raw_iter_get_current_record_pos(&file->iter);
+      *done_out = false;
+    }
+    if (result == SettingsFileEachCursorResult_ConsumedAndStop) {
+      break;
+    }
   }
 
   file->cur_record_pos = 0;
+
+  if (settings_raw_iter_end(&file->iter)) {
+    *next_cursor_out = 0;
+    *done_out = true;
+  }
 
   return S_SUCCESS;
 }
