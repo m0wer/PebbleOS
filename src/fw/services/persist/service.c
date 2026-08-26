@@ -13,7 +13,9 @@
 #include "pbl/services/filesystem/app_file.h"
 #include "pbl/services/filesystem/pfs.h"
 #include "pbl/services/settings/settings_file.h"
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
 #include "pbl/util/crc32.h"
+#endif
 #include <pbl/logging/logging.h>
 #include "system/passert.h"
 #include "pbl/util/attributes.h"
@@ -32,10 +34,13 @@ typedef struct PersistStore {
   SettingsFile file;
   bool file_open;
   uint8_t usage_count;          //!< How many clients are using this store
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
   uint8_t backup_ref_count;
   uint32_t mutation_generation;
+#endif
 } PersistStore;
 
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
 struct PersistBackupExport {
   PersistStore *store;
   uint32_t generation;
@@ -59,14 +64,17 @@ typedef struct {
   void *context;
   status_t status;
 } ExportPageContext;
+#endif
 
 // Each open client has a PersistStore structure linked into this list. If both
 // a worker and foreground app of the same UUID are running, then they share the
 // same store.
 static ListNode *s_client_stores;
 static PebbleMutex *s_mutex;
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
 static uint32_t s_inventory_generation;
 static PersistBackupImport *s_active_import;
+#endif
 
 static bool prv_uuid_list_filter(ListNode* node, void* data) {
   const Uuid *uuid = data;
@@ -89,6 +97,7 @@ static inline void prv_unlock(void) {
 
 // "ps" prefix + 32 hex chars (16-byte UUID) + NUL.
 #define PERSIST_FILE_NAME_MAX_LENGTH sizeof("ps000102030405060708090a0b0c0d0e0f")
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
 #define PERSIST_ROLLBACK_FILE_NAME "psrb"
 
 typedef struct PACKED {
@@ -101,6 +110,7 @@ typedef struct PACKED {
 } PersistRollbackMarker;
 
 #define PERSIST_ROLLBACK_MARKER_MAGIC 0x50524231
+#endif
 
 static status_t prv_get_file_name(char *name, size_t buf_len, const Uuid *uuid) {
   // Persist files are named "ps<uuid-hex>". The "ps" prefix indicates the file
@@ -114,6 +124,7 @@ static status_t prv_get_file_name(char *name, size_t buf_len, const Uuid *uuid) 
                   b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
 }
 
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
 static bool prv_file_exists(const char *name) {
   int fd = pfs_open(name, OP_FLAG_READ, 0, 0);
   if (fd < 0) {
@@ -157,7 +168,9 @@ static status_t prv_open_store_file(PersistStore *store, bool create) {
   }
   return status;
 }
+#endif
 
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
 static uint32_t prv_marker_crc(const PersistRollbackMarker *marker) {
   return crc32(CRC32_INIT, marker, offsetof(PersistRollbackMarker, marker_crc));
 }
@@ -207,6 +220,7 @@ static void prv_recover_interrupted_import(void) {
   }
   pfs_remove(PERSIST_ROLLBACK_FILE_NAME);
 }
+#endif
 
 status_t persist_service_delete_file(const Uuid *uuid) {
   char name[PERSIST_FILE_NAME_MAX_LENGTH];
@@ -215,6 +229,7 @@ status_t persist_service_delete_file(const Uuid *uuid) {
   if (FAILED(status)) {
     return status;
   }
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
   prv_lock();
   PersistStore *store = prv_find_open_store(uuid);
   if (store && (store->usage_count || store->backup_ref_count)) {
@@ -226,6 +241,9 @@ status_t persist_service_delete_file(const Uuid *uuid) {
     s_inventory_generation++;
   }
   prv_unlock();
+#else
+  status = pfs_remove(name);
+#endif
   return status;
 }
 
@@ -320,11 +338,15 @@ static void prv_migrate_legacy_persist_files(void) {
       continue;
     }
 
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
     const bool new_file_existed = prv_file_exists(new_name);
+#endif
     if (PASSED(prv_copy_file(old_name, new_name))) {
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
       if (!new_file_existed) {
         s_inventory_generation++;
       }
+#endif
       pfs_remove(old_name);
     }
   }
@@ -336,9 +358,11 @@ static void prv_migrate_legacy_persist_files(void) {
 // Designed to be called once during reset
 void persist_service_init(void) {
   s_mutex = mutex_create();
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
   s_inventory_generation = 0;
 
   prv_recover_interrupted_import();
+#endif
   prv_migrate_legacy_persist_files();
 
   // Find and delete any AppInstallId-indexed persist files. Due to PBL-16663
@@ -373,7 +397,15 @@ SettingsFile * persist_service_lock_and_get_store(const Uuid *uuid) {
   PersistStore *store = prv_find_open_store(uuid);
   PBL_ASSERTN(store);
   if (!store->file_open) {
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
     PBL_ASSERTN(PASSED(prv_open_store_file(store, true)));
+#else
+    char filename[PERSIST_FILE_NAME_MAX_LENGTH];
+    PBL_ASSERTN(PASSED(prv_get_file_name(filename, sizeof(filename), uuid)));
+    PBL_ASSERTN(PASSED(settings_file_open_growable(
+        &store->file, filename, PERSIST_STORAGE_MAX_SPACE, PERSIST_STORAGE_INITIAL_ALLOC)));
+    store->file_open = true;
+#endif
   }
   return &store->file;
 }
@@ -382,6 +414,7 @@ void persist_service_unlock_store(SettingsFile *store) {
   prv_unlock();
 }
 
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
 static bool prv_store_file_filter(ListNode *node, void *data) {
   PersistStore *store = (PersistStore *)node;
   return store->file_open && &store->file == data;
@@ -392,6 +425,7 @@ void persist_service_store_did_change(SettingsFile *file) {
   PBL_ASSERTN(store);
   store->mutation_generation++;
 }
+#endif
 
 // Create a store for a client of the given UUID it doesn't already exist. If it
 // exists already (another client with the same UUID is running), then just
@@ -428,12 +462,21 @@ void persist_service_client_close(const Uuid *uuid) {
                 store->usage_count >= 1);
 
     if (--store->usage_count == 0) {
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
       prv_free_store_if_unused(store);
+#else
+      if (store->file_open) {
+        settings_file_close(&store->file);
+      }
+      list_remove(&store->list_node, &s_client_stores, NULL);
+      kernel_free(store);
+#endif
     }
   }
   prv_unlock();
 }
 
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
 static int prv_hex_value(char value) {
   if (value >= '0' && value <= '9') {
     return value - '0';
@@ -766,4 +809,5 @@ void persist_service_test_recover_interrupted_import(void) {
   prv_recover_interrupted_import();
   prv_unlock();
 }
+#endif
 #endif

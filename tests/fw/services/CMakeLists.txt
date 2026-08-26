@@ -515,5 +515,6 @@ pbl_clar_test(test_persist_backup_endpoint
   SOURCES
     src/fw/services/persist_backup_endpoint/endpoint.c
     lib/util/crc32.c
+  DEFINES CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
   OVERRIDES dummy_board
 )

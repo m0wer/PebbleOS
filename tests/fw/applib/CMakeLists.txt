@@ -53,6 +53,7 @@ pbl_clar_test(test_persist
     tests/fakes/fake_rtc.c
     tests/fakes/fake_spi_flash.c
     tests/fixtures/resources/builtin_resources.auto.c
+  DEFINES CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
   OVERRIDES dummy_board
 )
 
