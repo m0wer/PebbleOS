@@ -7,6 +7,8 @@ and [contributing](https://github.com/coredevices/PebbleOS/blob/main/CONTRIBUTIN
 
 **[Download the latest firmware release](https://github.com/m0wer/PebbleOS/releases/latest)**
 
+[PebbleApp](https://github.com/m0wer/PebbleApp) is the compatible installer and update client.
+
 ## Changes
 
 - Retain fragmented sleep periods and Quiet Time context during sleep classification
@@ -18,13 +20,17 @@ and [contributing](https://github.com/coredevices/PebbleOS/blob/main/CONTRIBUTIN
   ([upstream PR #1035](https://github.com/coredevices/PebbleOS/pull/1035)).
 - Build Moddable host utilities without a graphical session (`publish/headless-moddable-tools`).
 - Export sleep-classification diagnostics for analysis (`publish/sleep-diagnostics`).
+- Add app-data backup support for [PebbleApp](https://github.com/m0wer/PebbleApp).
 
 Branches named `publish/*` contain focused changes based directly on the upstream branch.
 
 ## Install
 
 Download the PBZ for your exact watch and hardware revision from the
-[latest release](https://github.com/m0wer/PebbleOS/releases/latest):
+[latest release](https://github.com/m0wer/PebbleOS/releases/latest) or a
+[CI prerelease](https://github.com/m0wer/PebbleOS/releases). Use the direct PBZ release or prerelease
+assets for installation. GitHub Actions artifact ZIPs also contain debug files and are not recommended
+for installation.
 
 - Pebble 2 Duo: `PebbleOS-asterix.pbz`
 - Pebble Time 2: `PebbleOS-obelix_dvt.pbz` or `PebbleOS-obelix_pvt.pbz`
