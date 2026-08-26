@@ -31,14 +31,20 @@ Download the PBZ for your exact watch and hardware revision from the
 - Pebble Round 2: `PebbleOS-getafix_evt.pbz`, `PebbleOS-getafix_dvt.pbz`, or
   `PebbleOS-getafix_dvt2.pbz`
 
-Do not install a PBZ built for a different product or hardware revision. Release assets are
-production builds; `SHA256SUMS` contains their checksums.
+The app checks the PBZ hardware revision before transferring it, so trying the candidates for your
+product is safe. A mismatch reports both revisions, for example
+`CORE_OBELIX_DVT != CORE_OBELIX_PVT`: the value on the right is the watch, so use
+`PebbleOS-obelix_pvt.pbz`. Revisions are not interchangeable. Release assets are production builds;
+`SHA256SUMS` contains their checksums.
 
 Transfer the downloaded `.pbz` file to the phone paired with the watch. In the Pebble app, enable
 **Settings > Show debug options**, open the watch in **Devices**, then choose
 **Firmware Update Debug > Sideload FW**. See the
 [firmware loading guide](docs/development/building_fw.md#loading-firmware-via-bluetooth) for other
 builds and ADB installation.
+
+A normal PBZ update through the app preserves watch settings and data. Factory reset, fast factory
+reset, and full-device flashing or erase operations do not.
 
 ## License
 
