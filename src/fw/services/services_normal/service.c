@@ -25,6 +25,9 @@
 #include "pbl/services/notifications/alerts_private.h"
 #include "pbl/services/notifications/notifications.h"
 #include "pbl/services/persist.h"
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
+#include "pbl/services/persist_backup_endpoint.h"
+#endif
 #include "pbl/services/phone_call.h"
 #include "pbl/services/process_management/app_order_storage.h"
 #include "pbl/services/send_text_service.h"
@@ -84,6 +87,9 @@ void services_normal_early_init(void) {
 
 void services_normal_init(void) {
   persist_service_init();
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
+  persist_backup_endpoint_init();
+#endif
 
   app_install_manager_init();
 

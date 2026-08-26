@@ -510,4 +510,12 @@ clar(ctx,
      test_sources_ant_glob="test_analytics_native.c",
      platforms=['asterix'])
 
+clar(ctx,
+     sources_ant_glob=(
+         " src/fw/services/persist_backup_endpoint/endpoint.c"
+         " lib/util/crc32.c"
+     ),
+     test_sources_ant_glob="test_persist_backup_endpoint.c",
+     override_includes=['dummy_board'])
+
 # vim:filetype=python
