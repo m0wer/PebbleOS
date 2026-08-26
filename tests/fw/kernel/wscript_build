@@ -10,3 +10,9 @@ clar(ctx,
     sources_ant_glob = " src/fw/kernel/remote_input.c",
     test_sources_ant_glob="test_remote_input.c",
     defines=["CONFIG_SERVICE_TOUCH"])
+
+clar(ctx,
+    sources_ant_glob =
+        " src/fw/kernel/notification_double_flick.c"
+        " lib/util/uuid.c",
+    test_sources_ant_glob="test_notification_double_flick.c")
