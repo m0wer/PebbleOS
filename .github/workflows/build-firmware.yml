@@ -200,6 +200,89 @@ jobs:
           name: firmware-${{ matrix.board }}
           path: merged
 
+  publish-ci-firmware:
+    needs: merge-firmware
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'm0wer/PebbleOS' &&
+      needs.merge-firmware.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download installable firmware
+        uses: actions/download-artifact@v8
+        with:
+          pattern: firmware-*
+          path: firmware
+
+      - name: Prepare prerelease assets
+        id: assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          release_dir=release-assets
+          mkdir "$release_dir"
+          boards=(asterix obelix_dvt obelix_pvt getafix_evt getafix_dvt getafix_dvt2)
+
+          obelix_pbzs=(firmware/firmware-obelix_pvt/normal_obelix_pvt_*.pbz)
+          if (( ${#obelix_pbzs[@]} != 1 )); then
+            printf 'Expected one obelix_pvt PBZ, found %d\n' "${#obelix_pbzs[@]}" >&2
+            exit 1
+          fi
+          filename=$(basename "${obelix_pbzs[0]}")
+          version=${filename#normal_obelix_pvt_}
+          version=${version%.pbz}
+          if [[ -z "$version" || "$version" == "$filename" ]]; then
+            printf 'Could not derive version from %s\n' "$filename" >&2
+            exit 1
+          fi
+
+          for board in "${boards[@]}"; do
+            pbzs=(firmware/firmware-"${board}"/*.pbz)
+            if (( ${#pbzs[@]} != 1 )); then
+              printf 'Expected one %s PBZ, found %d\n' "$board" "${#pbzs[@]}" >&2
+              exit 1
+            fi
+            cp "${pbzs[0]}" "$release_dir/PebbleOS-${board}.pbz"
+          done
+          (
+            cd "$release_dir"
+            sha256sum PebbleOS-*.pbz > SHA256SUMS
+          )
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Create CI prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.assets.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_tag="ci-main-${GITHUB_RUN_ID}"
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$release_tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "PebbleOS CI ${VERSION}" \
+              --prerelease \
+              --notes "Continuous main-branch firmware build."
+            gh release upload "$release_tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber \
+              release-assets/PebbleOS-*.pbz release-assets/SHA256SUMS
+          else
+            gh release create "$release_tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "PebbleOS CI ${VERSION}" \
+              --prerelease \
+              --notes "Continuous main-branch firmware build." \
+              release-assets/PebbleOS-*.pbz release-assets/SHA256SUMS
+          fi
+
   build-firmware-status:
     needs: [changes-firmware, build-firmware, merge-firmware]
     if: always()
