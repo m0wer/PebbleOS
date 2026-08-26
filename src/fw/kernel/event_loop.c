@@ -47,6 +47,10 @@
 #include "pbl/services/light.h"
 #include "pbl/services/new_timer/new_timer.h"
 #include "pbl/services/put_bytes/put_bytes.h"
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
+#include "pbl/services/persist_backup_endpoint.h"
+#endif
+#include "pbl/services/system_task.h"
 #ifdef CONFIG_TOUCH
 #include "pbl/services/touch/touch.h"
 #include "pbl/services/touch/touch_session.h"
@@ -537,6 +541,9 @@ static NOINLINE void prv_extended_event_handler(PebbleEvent* e) {
       PebbleCommSessionEvent *comm_session_event = &e->bluetooth.comm_session_event;
       debounced_connection_service_handle_event(comm_session_event);
       put_bytes_handle_comm_session_event(comm_session_event);
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
+      persist_backup_endpoint_handle_comm_session_event(comm_session_event);
+#endif
 #ifndef CONFIG_RECOVERY_FW
       if (comm_session_event->is_system) {
         // tell the phone which app is running

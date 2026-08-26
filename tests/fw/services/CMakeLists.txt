@@ -510,3 +510,10 @@ pbl_clar_test(test_analytics_native
     tests/fakes/fake_rtc.c
   PLATFORMS asterix
 )
+
+pbl_clar_test(test_persist_backup_endpoint
+  SOURCES
+    src/fw/services/persist_backup_endpoint/endpoint.c
+    lib/util/crc32.c
+  OVERRIDES dummy_board
+)

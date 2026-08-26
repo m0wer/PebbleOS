@@ -141,6 +141,9 @@ static void prv_send_watch_versions(CommSession *session) {
   versions_msg.capabilities.blob_db_version_support = 1;
   versions_msg.capabilities.weather_db_v4_support = 1;
   versions_msg.capabilities.notification_image_support = NOTIFICATION_IMAGE_SUPPORTED;
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
+  versions_msg.capabilities.watch_app_data_backup_support = 1;
+#endif
   bt_local_id_copy_address(&versions_msg.device_address);
 
   versions_msg.system_resources_version = resource_get_system_version();
