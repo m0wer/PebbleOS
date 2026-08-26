@@ -165,6 +165,7 @@ typedef bool (*SettingsFileEachCallback)(SettingsFile *file, SettingsRecordInfo 
 //! without fault).
 status_t settings_file_each(SettingsFile *file, SettingsFileEachCallback cb, void *context);
 
+#ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
 //! Result returned by a cursor iteration callback.
 typedef enum {
   SettingsFileEachCursorResult_ConsumedAndContinue,
@@ -181,6 +182,7 @@ typedef SettingsFileEachCursorResult (*SettingsFileEachCursorCallback)(SettingsF
 status_t settings_file_each_cursor(SettingsFile *file, uint32_t cursor,
                                    SettingsFileEachCursorCallback cb, void *context,
                                    uint32_t *next_cursor_out, bool *done_out);
+#endif
 
 typedef void (*SettingsFileRewriteCallback)(SettingsFile *old_file,
                                             SettingsFile *new_file,

@@ -17,7 +17,8 @@ clar(ctx,
         " src/fw/util/rand/rand.c" \
         " third_party/tinymt/TinyMT/tinymt/tinymt32.c",
     test_sources_ant_glob = "test_settings_file.c",
-    defines=['DUMA_DISABLED'],  # DUMA false-positive, therefore disabled
+    defines=['DUMA_DISABLED',
+             'CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT'],  # DUMA false-positive, therefore disabled
     override_includes=['dummy_board'])
 
 # vim:filetype=python
