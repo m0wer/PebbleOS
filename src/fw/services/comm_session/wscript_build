@@ -3,6 +3,8 @@ import json
 in_node = bld.path.find_node('protocol_endpoints_table.json')
 out_node = bld.path.get_bld().make_node('protocol_endpoints_table.auto.h')
 
+PERSIST_BACKUP_ENDPOINT_ID = 9001
+
 def generate_endpoints_table(task):
     in_node = task.inputs[0]
     out_node = task.outputs[0]
@@ -14,6 +16,10 @@ def generate_endpoints_table(task):
     endpoints.extend(definition['prf_and_normal_fw'])
     if bld.env.VARIANT != 'prf':
         endpoints.extend(definition['normal_fw_only'])
+    if not bld.env.CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT:
+        # The persist backup endpoint is only present when its service is built.
+        endpoints = [endpoint for endpoint in endpoints
+                     if endpoint[0] != PERSIST_BACKUP_ENDPOINT_ID]
     endpoints.sort()
 
     def get_access_enum(access_str):
