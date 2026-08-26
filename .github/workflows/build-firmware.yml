@@ -119,13 +119,10 @@ jobs:
             "s3://${{ vars.LOG_HASH_BUCKET_NAME }}/${{ steps.build_id.outputs.BUILD_ID }}-${{ github.sha }}-normal.json" \
             --endpoint-url "${{ vars.LOG_HASH_BUCKET_ENDPOINT }}"
 
-  # Dual-slot RELEASE PBZ for the hardware-lab release-QA boards. The build-firmware job above is
-  # single-slot AND a debug build, so it cannot be the "to" of an upgrade test: OTA writes into the
-  # watch's *inactive* slot (needs both slots), and the watch refuses to apply a debug PBZ over the
-  # release "from". The release-QA dispatch (coredevices/unicorn) needs a merged dual-slot RELEASE
-  # PBZ, the same shape as a release asset — so build both slots (release) and merge, in one job per
-  # board, no cross-job artifact passing. Only the two QA-hardware boards; kept out of
-  # build-firmware-status so a QA-artifact hiccup never blocks a firmware PR.
+  # Installable RELEASE PBZs, matching the stable release asset shape. The build-firmware job above
+  # is single-slot and a debug build, so it cannot provide OTA targets. Obelix and Getafix OTA writes
+  # into the inactive slot, therefore their release bundles must merge both slots. The artifacts for
+  # obelix_pvt and getafix_dvt2 also remain the hardware-lab release-QA targets.
   build-qa-firmware:
     needs: changes-firmware
     if: needs.changes-firmware.outputs.should-build == 'true'
@@ -137,7 +134,11 @@ jobs:
     strategy:
       matrix:
         board:
+          - asterix
+          - obelix@dvt
           - obelix@pvt
+          - getafix@evt
+          - getafix@dvt
           - getafix@dvt2
 
     steps:
@@ -162,29 +163,62 @@ jobs:
 
       - name: Set artifact board name
         id: artifact_board
-        run: echo "NAME=$(printf '%s' "$BOARD" | tr @ _)" >> "$GITHUB_OUTPUT"
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'NAME=%s\n' "$(printf '%s' "$BOARD" | tr @ _)" >> "$GITHUB_OUTPUT"
         env:
           BOARD: ${{ matrix.board }}
 
-      - name: Build both release slots and merge into a dual-slot PBZ
+      - name: Build installable release PBZ
         shell: bash
         run: |
           set -euo pipefail
           name='${{ steps.artifact_board.outputs.NAME }}'
           mkdir -p out
-          for slot in 0 1; do
-            ./waf configure --board '${{ matrix.board }}' -DCONFIG_FIRMWARE_SLOT=$slot -DCONFIG_RELEASE=y
-            ./waf build
-            ./waf bundle
-            cp build/normal_*_slot${slot}.pbz .
-          done
-          s0=$(ls normal_*_slot0.pbz | head -1)
-          s1=$(ls normal_*_slot1.pbz | head -1)
-          # Version string is embedded in the bundle name (git describe), e.g.
-          # normal_obelix_pvt_v4.35.0-2-gdeadbee_slot0.pbz -> v4.35.0-2-gdeadbee.
-          ver=$(basename "$s0" | sed -E "s/^normal_${name}_//; s/_slot0\.pbz$//")
-          python3 tools/merge_pbz.py --slot0-pbz "$s0" --slot1-pbz "$s1" \
-            --output "out/normal_${name}_${ver}.pbz"
+          shopt -s nullglob
+          case '${{ matrix.board }}' in
+            asterix)
+              ./waf configure --board '${{ matrix.board }}' -DCONFIG_RELEASE=y
+              ./waf build
+              ./waf bundle
+              pbzs=(build/normal_asterix_*.pbz)
+              if (( ${#pbzs[@]} != 1 )); then
+                printf 'Expected one asterix PBZ, found %d\n' "${#pbzs[@]}" >&2
+                exit 1
+              fi
+              cp "${pbzs[0]}" "out/$(basename "${pbzs[0]}")"
+              ;;
+            obelix@*|getafix@*)
+              for slot in 0 1; do
+                ./waf configure --board '${{ matrix.board }}' -DCONFIG_FIRMWARE_SLOT="$slot" -DCONFIG_RELEASE=y
+                ./waf build
+                ./waf bundle
+                pbzs=(build/normal_"${name}"_*_slot"${slot}".pbz)
+                if (( ${#pbzs[@]} != 1 )); then
+                  printf 'Expected one %s slot %s PBZ, found %d\n' "$name" "$slot" "${#pbzs[@]}" >&2
+                  exit 1
+                fi
+                cp "${pbzs[0]}" "out/slot${slot}.pbz"
+                if (( slot == 0 )); then
+                  filename=$(basename "${pbzs[0]}")
+                  version=${filename#"normal_${name}_"}
+                  version=${version%_slot0.pbz}
+                  if [[ -z "$version" || "$version" == "$filename" ]]; then
+                    printf 'Could not derive version from %s\n' "$filename" >&2
+                    exit 1
+                  fi
+                fi
+              done
+              python3 tools/merge_pbz.py --slot0-pbz out/slot0.pbz --slot1-pbz out/slot1.pbz \
+                --output "out/normal_${name}_${version}.pbz"
+              rm out/slot0.pbz out/slot1.pbz
+              ;;
+            *)
+              printf 'Unsupported board %s\n' '${{ matrix.board }}' >&2
+              exit 1
+              ;;
+          esac
           # Ship the loghash dict alongside so the QA fwlog step can dehash release logs.
           cp build/pebbleos_loghash_dict.json out/ 2>/dev/null || true
           ls -la out
@@ -194,6 +228,89 @@ jobs:
         with:
           name: qa-firmware-${{ steps.artifact_board.outputs.NAME }}
           path: out/**
+
+  publish-ci-firmware:
+    needs: build-qa-firmware
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'm0wer/PebbleOS' &&
+      needs.build-qa-firmware.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download installable firmware
+        uses: actions/download-artifact@v8
+        with:
+          pattern: qa-firmware-*
+          path: qa-firmware
+
+      - name: Prepare prerelease assets
+        id: assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          release_dir=release-assets
+          mkdir "$release_dir"
+          boards=(asterix obelix_dvt obelix_pvt getafix_evt getafix_dvt getafix_dvt2)
+
+          obelix_pbzs=(qa-firmware/qa-firmware-obelix_pvt/normal_obelix_pvt_*.pbz)
+          if (( ${#obelix_pbzs[@]} != 1 )); then
+            printf 'Expected one obelix_pvt PBZ, found %d\n' "${#obelix_pbzs[@]}" >&2
+            exit 1
+          fi
+          filename=$(basename "${obelix_pbzs[0]}")
+          version=${filename#normal_obelix_pvt_}
+          version=${version%.pbz}
+          if [[ -z "$version" || "$version" == "$filename" ]]; then
+            printf 'Could not derive version from %s\n' "$filename" >&2
+            exit 1
+          fi
+
+          for board in "${boards[@]}"; do
+            pbzs=(qa-firmware/qa-firmware-"${board}"/*.pbz)
+            if (( ${#pbzs[@]} != 1 )); then
+              printf 'Expected one %s PBZ, found %d\n' "$board" "${#pbzs[@]}" >&2
+              exit 1
+            fi
+            cp "${pbzs[0]}" "$release_dir/PebbleOS-${board}.pbz"
+          done
+          (
+            cd "$release_dir"
+            sha256sum PebbleOS-*.pbz > SHA256SUMS
+          )
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Create CI prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.assets.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_tag="ci-main-${GITHUB_RUN_ID}"
+          if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$release_tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "PebbleOS CI ${VERSION}" \
+              --prerelease \
+              --notes "Continuous main-branch firmware build."
+            gh release upload "$release_tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber \
+              release-assets/PebbleOS-*.pbz release-assets/SHA256SUMS
+          else
+            gh release create "$release_tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "PebbleOS CI ${VERSION}" \
+              --prerelease \
+              --notes "Continuous main-branch firmware build." \
+              release-assets/PebbleOS-*.pbz release-assets/SHA256SUMS
+          fi
 
   # Once the dual-slot QA firmware is built, kick off the hardware-lab release-QA in
   # coredevices/unicorn against THIS run's qa-firmware artifact (erase -> PRF -> pair -> OTA ->
