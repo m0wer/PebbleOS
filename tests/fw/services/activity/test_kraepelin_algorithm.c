@@ -2161,6 +2161,47 @@ void test_kraepelin_algorithm__walks_and_runs(void) {
   s_kalg_state = NULL;
 }
 
+// ---------------------------------------------------------------------------------------
+void test_kraepelin_algorithm__disabled_tracking_does_not_resume_partial_walk(void) {
+  const int k_detection_minutes = 10;
+  const int k_disabled_minutes = 30;
+  KAlgTestActivityMinute active_minutes[k_detection_minutes];
+  KAlgTestActivityMinute disabled_minutes[k_disabled_minutes];
+  memset(active_minutes, 0, sizeof(active_minutes));
+  memset(disabled_minutes, 0, sizeof(disabled_minutes));
+  for (int i = 0; i < k_detection_minutes; i++) {
+    active_minutes[i].steps = 80;
+  }
+  for (int i = 0; i < k_disabled_minutes; i++) {
+    disabled_minutes[i].steps = 80;
+  }
+
+  s_kalg_state = kernel_zalloc(kalg_state_size());
+  kalg_init(s_kalg_state, prv_stats_cb);
+  rtc_set_time(100 * SECONDS_PER_MINUTE);
+  s_num_captured_activity_sessions = 0;
+
+  prv_feed_activity_minutes(active_minutes, ARRAY_LENGTH(active_minutes));
+  cl_assert_equal_i(s_num_captured_activity_sessions, 1);
+
+  kalg_enable_activity_tracking(s_kalg_state, false);
+  prv_feed_activity_minutes(disabled_minutes, ARRAY_LENGTH(disabled_minutes));
+  s_num_captured_activity_sessions = 0;
+
+  kalg_enable_activity_tracking(s_kalg_state, true);
+  const time_t resumed_walk_start = rtc_get_time() - SECONDS_PER_MINUTE;
+  prv_feed_activity_minutes(active_minutes, 1);
+  cl_assert_equal_i(s_num_captured_activity_sessions, 0);
+
+  prv_feed_activity_minutes(&active_minutes[1], ARRAY_LENGTH(active_minutes) - 1);
+  cl_assert_equal_i(s_num_captured_activity_sessions, 1);
+  cl_assert_equal_i(s_captured_activity_sessions[0].start_utc, resumed_walk_start);
+  cl_assert_equal_i(s_captured_activity_sessions[0].len_minutes, k_detection_minutes);
+
+  kalg_enable_activity_tracking(s_kalg_state, false);
+  kernel_free(s_kalg_state);
+  s_kalg_state = NULL;
+}
 
 // ---------------------------------------------------------------------------------------
 void test_kraepelin_algorithm__sleep_stats(void) {

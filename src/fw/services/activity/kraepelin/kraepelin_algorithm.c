@@ -2494,5 +2494,11 @@ void kalg_get_sleep_stats(KAlgState *alg_state, KAlgOngoingSleepStats *stats) {
 // ---------------------------------------------------------------------------------------
 void kalg_enable_activity_tracking(KAlgState *kalg_state, bool enable) {
   kalg_state->disable_activity_session_tracking = !enable;
+  if (!enable) {
+    // Manual workouts own activity sessions while automatic tracking is disabled.
+    // Discard partial detectors so they cannot resume across the manual workout.
+    prv_reset_step_activity_state(&kalg_state->walk_state);
+    prv_reset_step_activity_state(&kalg_state->run_state);
+  }
   prv_reset_state(kalg_state);
 }
