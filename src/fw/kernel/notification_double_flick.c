@@ -30,6 +30,9 @@ void notification_double_flick_handle_shake(PebbleEvent *event) {
     return;
   }
 
+  // The notification owns both flicks so the first one cannot trigger the app underneath it.
+  event->task_mask |= 1 << PebbleTask_App;
+
   const RtcTicks now = rtc_get_ticks();
   const RtcTicks dismiss_window_ticks =
       (RtcTicks)DOUBLE_FLICK_DISMISS_WINDOW_MS * RTC_TICKS_HZ / 1000;
@@ -37,9 +40,7 @@ void notification_double_flick_handle_shake(PebbleEvent *event) {
       (now - s_first_flick_ticks) <= dismiss_window_ticks) {
     // Clear before invoking so another queued shake cannot repeat this dismissal.
     prv_clear_pending();
-    if (notification_window_dismiss_current_modal_notification()) {
-      event->task_mask |= 1 << PebbleTask_App;
-    }
+    notification_window_dismiss_current_modal_notification();
     return;
   }
 
