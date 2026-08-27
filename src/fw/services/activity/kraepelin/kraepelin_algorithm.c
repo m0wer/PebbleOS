@@ -2401,14 +2401,22 @@ void kalg_activities_update(KAlgState *state, time_t utc_now, uint16_t steps, ui
                             KAlgActivitySessionCallback sessions_cb, void *context) {
   state->sleep_diagnostics = (KAlgSleepDiagnostics) {};
 
-  // If we've encountered a significant change in UTC time (connecting to a new phone, factory
-  // reset, etc.) it could wreak havoc with our activity state machines, so we need to reset
-  // state
-  if ((utc_now < state->last_activity_update_utc)
-      || (utc_now > (state->last_activity_update_utc + (5 * SECONDS_PER_MINUTE)))) {
-    PBL_LOG_WRN("Resetting state due to time travel");
+  const bool clock_moved_back = utc_now < state->last_activity_update_utc;
+  const bool input_gap = (state->last_activity_update_utc != 0) &&
+                         (utc_now > (state->last_activity_update_utc + (5 * SECONDS_PER_MINUTE)));
+  if (input_gap) {
+    PBL_LOG_WRN("Finalizing sleep and resetting state after activity data gap");
+    if (state->sleep_state.current_stats.start_time != KALG_START_TIME_NONE) {
+      prv_sleep_activity_update(state, state->last_activity_update_utc, 0 /*vmc*/,
+                                0 /*orientation*/, false /*definitely_not_worn*/,
+                                false /*definitely_worn*/, false /*sleep_intent_hint*/,
+                                true /*shutting_down*/, sessions_cb, context);
+    }
     prv_reset_state(state);
-  };
+  } else if (clock_moved_back) {
+    PBL_LOG_WRN("Resetting state after clock moved backward");
+    prv_reset_state(state);
+  }
   state->last_activity_update_utc = utc_now;
 
   if (!state->disable_activity_session_tracking) {
