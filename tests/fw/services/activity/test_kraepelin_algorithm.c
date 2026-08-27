@@ -2384,6 +2384,11 @@ static void prv_synth_minute(uint16_t vmc, uint8_t orientation, bool definitely_
   rtc_set_time(s_synth_now);
 }
 
+static void prv_synth_gap(int minutes) {
+  s_synth_now += minutes * SECONDS_PER_MINUTE;
+  rtc_set_time(s_synth_now);
+}
+
 void test_kraepelin_algorithm__sleep_diagnostics_are_only_valid_for_scored_minutes(void) {
   prv_synth_start();
   for (int i = 0; i < 8; i++) {
@@ -2579,6 +2584,33 @@ void test_kraepelin_algorithm__long_sleep_continues_after_bed_movement(void) {
   prv_synth_motion(20);
 
   cl_assert_equal_i(prv_synth_container_count(), 2);
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__forward_gap_finalizes_long_sleep(void) {
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_sleep(75, false, false);
+
+  prv_synth_gap(14);
+  prv_synth_motion(1);
+
+  cl_assert_equal_i(prv_synth_container_count(), 1);
+  cl_assert(s_captured_sleep_sessions[0].len_m >= 60);
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__forward_gap_finalizes_sleep_with_intent(void) {
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_sleep(30, false, true);
+
+  prv_synth_gap(14);
+  prv_synth_motion(1);
+
+  cl_assert_equal_i(prv_synth_container_count(), 1);
+  cl_assert(s_captured_sleep_sessions[0].len_m >= 10);
+  cl_assert(s_captured_sleep_sessions[0].len_m < 60);
   prv_synth_end();
 }
 
