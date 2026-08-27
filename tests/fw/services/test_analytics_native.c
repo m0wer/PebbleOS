@@ -74,7 +74,7 @@ DataLoggingSession *dls_create(uint32_t tag, DataLoggingItemType item_type, uint
   cl_assert_equal_i(tag, DlsSystemTagAnalyticsNativeHeartbeat);
   cl_assert_equal_i(item_type, DATA_LOGGING_BYTE_ARRAY);
   cl_assert_equal_i(item_size, sizeof(s_record));
-  cl_assert(buffered);
+  cl_assert(!buffered);
   cl_assert(!resume);
   cl_assert(uuid != NULL);
   return (DataLoggingSession *)1;
