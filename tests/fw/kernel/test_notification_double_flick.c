@@ -10,14 +10,16 @@
 
 static RtcTicks s_now;
 static bool s_dismiss_succeeds;
+static bool s_enabled;
+static bool s_has_notification;
 
 bool shell_prefs_get_double_flick_dismiss_notification_enabled(void) {
-  return true;
+  return s_enabled;
 }
 
 bool notification_window_get_current_modal_dismissible_notification_id(Uuid *id_out) {
   *id_out = (Uuid)UUID_INVALID;
-  return true;
+  return s_has_notification;
 }
 
 bool notification_window_dismiss_current_modal_notification(void) {
@@ -37,15 +39,17 @@ static PebbleEvent prv_shake_event(void) {
 void test_notification_double_flick__initialize(void) {
   s_now = 0;
   s_dismiss_succeeds = false;
+  s_enabled = true;
+  s_has_notification = true;
   notification_double_flick_test_reset();
 }
 
-void test_notification_double_flick__first_shake_is_not_consumed(void) {
+void test_notification_double_flick__first_shake_is_consumed(void) {
   PebbleEvent event = prv_shake_event();
 
   notification_double_flick_handle_shake(&event);
 
-  cl_assert_equal_i(0, event.task_mask & (1 << PebbleTask_App));
+  cl_assert_equal_i(1 << PebbleTask_App, event.task_mask & (1 << PebbleTask_App));
 }
 
 void test_notification_double_flick__successful_second_shake_is_consumed(void) {
@@ -57,11 +61,11 @@ void test_notification_double_flick__successful_second_shake_is_consumed(void) {
   s_now++;
   notification_double_flick_handle_shake(&second);
 
-  cl_assert_equal_i(0, first.task_mask & (1 << PebbleTask_App));
+  cl_assert_equal_i(1 << PebbleTask_App, first.task_mask & (1 << PebbleTask_App));
   cl_assert_equal_i(1 << PebbleTask_App, second.task_mask & (1 << PebbleTask_App));
 }
 
-void test_notification_double_flick__unsuccessful_second_shake_is_not_consumed(void) {
+void test_notification_double_flick__unsuccessful_second_shake_is_consumed(void) {
   PebbleEvent first = prv_shake_event();
   PebbleEvent second = prv_shake_event();
 
@@ -69,6 +73,24 @@ void test_notification_double_flick__unsuccessful_second_shake_is_not_consumed(v
   s_now++;
   notification_double_flick_handle_shake(&second);
 
-  cl_assert_equal_i(0, first.task_mask & (1 << PebbleTask_App));
-  cl_assert_equal_i(0, second.task_mask & (1 << PebbleTask_App));
+  cl_assert_equal_i(1 << PebbleTask_App, first.task_mask & (1 << PebbleTask_App));
+  cl_assert_equal_i(1 << PebbleTask_App, second.task_mask & (1 << PebbleTask_App));
+}
+
+void test_notification_double_flick__disabled_gesture_does_not_consume_shake(void) {
+  PebbleEvent event = prv_shake_event();
+  s_enabled = false;
+
+  notification_double_flick_handle_shake(&event);
+
+  cl_assert_equal_i(0, event.task_mask & (1 << PebbleTask_App));
+}
+
+void test_notification_double_flick__without_notification_does_not_consume_shake(void) {
+  PebbleEvent event = prv_shake_event();
+  s_has_notification = false;
+
+  notification_double_flick_handle_shake(&event);
+
+  cl_assert_equal_i(0, event.task_mask & (1 << PebbleTask_App));
 }
