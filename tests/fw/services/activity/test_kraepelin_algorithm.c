@@ -2274,9 +2274,10 @@ static void prv_feed_walk_minutes(int num_minutes) {
   time_t now = rtc_get_time();
   for (int i = 0; i < num_minutes; i++) {
     kalg_activities_update(s_kalg_state, now, 80 /*steps*/, 7000 /*vmc*/, 0 /*orientation*/,
-                           true /*definitely_not_worn*/, false /*sleep_intent_hint*/,
-                           100 /*resting_calories*/, 200 /*active_calories*/, 1000 /*distance_mm*/,
-                           false /*shutting_down*/, prv_activity_session_callback, NULL);
+                           true /*definitely_not_worn*/, false /*definitely_worn*/,
+                           false /*sleep_intent_hint*/, 100 /*resting_calories*/,
+                           200 /*active_calories*/, 1000 /*distance_mm*/, false /*shutting_down*/,
+                           prv_activity_session_callback, NULL);
     now += SECONDS_PER_MINUTE;
     rtc_set_time(now);
   }
