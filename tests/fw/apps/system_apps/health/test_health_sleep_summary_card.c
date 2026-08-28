@@ -264,3 +264,45 @@ void test_health_sleep_summary_card__render_sleep_late_start_late_end1(void) {
   prv_create_card_and_render(&health_data);
   cl_check(gbitmap_pbi_eq(&s_ctx.dest_bitmap, TEST_PBI_FILE));
 }
+
+void test_health_sleep_summary_card__render_sleep_with_nap(void) {
+  const time_t start_of_today = time_util_get_midnight_of(s_now_utc);
+
+  HealthData health_data = {
+      .sleep_data[0] = (9 * SECONDS_PER_HOUR),
+      .typical_sleep = (8 * SECONDS_PER_HOUR),
+      .monthly_sleep_average = (8 * SECONDS_PER_HOUR),
+      .sleep_start = -2 * SECONDS_PER_HOUR,
+      .sleep_end = 6 * SECONDS_PER_HOUR,
+      .typical_sleep_start = -2 * SECONDS_PER_HOUR,
+      .typical_sleep_end = 6 * SECONDS_PER_HOUR,
+      .num_activity_sessions = 4,
+      .activity_sessions[0] =
+          {
+              .start_utc = start_of_today - (2 * SECONDS_PER_HOUR),
+              .length_min = (8 * MINUTES_PER_HOUR),
+              .type = ActivitySessionType_Sleep,
+          },
+      .activity_sessions[1] =
+          {
+              .start_utc = start_of_today + (2 * SECONDS_PER_HOUR),
+              .length_min = (1 * MINUTES_PER_HOUR),
+              .type = ActivitySessionType_RestfulSleep,
+          },
+      .activity_sessions[2] =
+          {
+              .start_utc = start_of_today + (14 * SECONDS_PER_HOUR),
+              .length_min = (1 * MINUTES_PER_HOUR),
+              .type = ActivitySessionType_Nap,
+          },
+      .activity_sessions[3] =
+          {
+              .start_utc = start_of_today + (14 * SECONDS_PER_HOUR) + (15 * SECONDS_PER_MINUTE),
+              .length_min = 30,
+              .type = ActivitySessionType_RestfulNap,
+          },
+  };
+
+  prv_create_card_and_render(&health_data);
+  cl_check(gbitmap_pbi_eq(&s_ctx.dest_bitmap, TEST_PBI_FILE));
+}
