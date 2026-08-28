@@ -2458,6 +2458,16 @@ static bool prv_synth_has_short_container(void) {
   return false;
 }
 
+static uint16_t prv_synth_longest_container_minutes(void) {
+  uint16_t longest = 0;
+  for (int i = 0; i < s_num_captured_sleep_sessions; i++) {
+    if (s_captured_sleep_sessions[i].activity == KAlgActivityType_Sleep) {
+      longest = MAX(longest, s_captured_sleep_sessions[i].len_m);
+    }
+  }
+  return longest;
+}
+
 void test_kraepelin_algorithm__fragmented_short_cycle_requires_follower(void) {
   prv_synth_start();
   prv_synth_motion(20);
@@ -2585,6 +2595,37 @@ void test_kraepelin_algorithm__long_sleep_continues_after_bed_movement(void) {
   prv_synth_motion(20);
 
   cl_assert_equal_i(prv_synth_container_count(), 2);
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__sleep_intent_excludes_awake_tail_from_motion_quality(void) {
+  static const struct {
+    uint16_t vmc;
+    uint8_t orientation;
+  } samples[] = {
+      {0, 120},  {0, 120},  {0, 120},   {0, 120},    {0, 120},    {0, 120},  {0, 121},
+      {0, 121},  {0, 121},  {0, 121},   {0, 121},    {0, 121},    {0, 121},  {159, 97},
+      {0, 97},   {0, 97},   {0, 97},    {0, 97},     {0, 97},     {0, 97},   {0, 97},
+      {0, 97},   {0, 97},   {0, 97},    {0, 97},     {0, 97},     {0, 97},   {0, 97},
+      {0, 97},   {0, 97},   {0, 97},    {0, 97},     {2263, 63},  {0, 47},   {2382, 106},
+      {0, 105},  {0, 105},  {0, 105},   {0, 105},    {2887, 126}, {0, 96},   {0, 96},
+      {0, 96},   {435, 96}, {0, 96},    {0, 96},     {0, 96},     {0, 96},   {2589, 127},
+      {0, 104},  {0, 104},  {601, 104}, {5856, 111}, {0, 96},     {0, 96},   {0, 96},
+      {0, 96},   {0, 96},   {0, 96},    {0, 96},     {0, 96},     {0, 96},   {1165, 96},
+      {339, 96}, {360, 96}, {3764, 89}, {0, 88},     {0, 88},     {175, 88}, {0, 88},
+      {0, 88},
+  };
+
+  prv_synth_start();
+  prv_synth_motion(20);
+  for (size_t i = 0; i < ARRAY_LENGTH(samples); i++) {
+    prv_synth_minute(samples[i].vmc, samples[i].orientation, false /*definitely_not_worn*/,
+                     i % 30 == 0 /*definitely_worn*/, true /*sleep_intent_hint*/);
+  }
+  prv_synth_motion(20);
+
+  cl_assert(!(s_synth_diagnostic_flags & KAlgSleepDiagnosticFlag_RejectedMotionQuality));
+  cl_assert(prv_synth_longest_container_minutes() >= 50);
   prv_synth_end();
 }
 

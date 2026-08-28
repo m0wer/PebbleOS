@@ -1852,9 +1852,29 @@ static void prv_sleep_activity_update_session_state(
   // Compute running averages
   unsigned pct_non_zero = 0;
   uint16_t avg_vmc = 0;
+  unsigned motion_quality_minutes = minutes_since_sleep_started;
   if (state->current_stats.start_time != KALG_START_TIME_NONE) {
-    pct_non_zero = (state->current_stats.num_non_zero_minutes * 100) / minutes_since_sleep_started;
-    avg_vmc = state->current_stats.vmc_sum / minutes_since_sleep_started;
+    uint16_t non_zero_minutes = state->current_stats.num_non_zero_minutes;
+    uint32_t vmc_sum = state->current_stats.vmc_sum;
+    const uint16_t sleep_intent_minutes =
+        state->current_stats.sleep_intent_minutes -
+        MIN(state->current_stats.sleep_intent_minutes,
+            state->current_stats.consecutive_awake_intent_minutes);
+    const bool has_sleep_intent =
+        (motion_quality_minutes >= params->min_short_sleep_cycle_len_minutes) &&
+        ((sleep_intent_minutes * 2) >= motion_quality_minutes);
+    // Wake-confirmation motion should not invalidate an intent-backed sleep candidate.
+    if (has_sleep_intent) {
+      const unsigned awake_tail_minutes =
+          MIN(state->current_stats.consecutive_awake_minutes, motion_quality_minutes);
+      motion_quality_minutes -= awake_tail_minutes;
+      non_zero_minutes -= MIN(non_zero_minutes, state->current_stats.num_non_zero_awake_tail);
+      vmc_sum -= MIN(vmc_sum, state->current_stats.vmc_sum_awake_tail);
+    }
+    if (motion_quality_minutes > 0) {
+      pct_non_zero = (non_zero_minutes * 100) / motion_quality_minutes;
+      avg_vmc = vmc_sum / motion_quality_minutes;
+    }
   }
 
   // This gets set to true if we decided that the current sleep session we are in is
@@ -1930,8 +1950,8 @@ static void prv_sleep_activity_update_session_state(
       *sleep_end_time = sample_utc;
       KALG_LOG_DEBUG("Cycle ended because score was too high for this minute");
 
-    } else if ((minutes_since_sleep_started > params->min_sleep_len_for_active_pct_check)
-      && (pct_non_zero > params->max_active_minutes_pct)) {
+    } else if ((motion_quality_minutes > params->min_sleep_len_for_active_pct_check) &&
+               (pct_non_zero > params->max_active_minutes_pct)) {
       // Too high a percent of awake minutes
       // If the percentage of non-zero minutes is too high, reject this cycle.
       *sleep_end_time = sample_utc;
@@ -1940,8 +1960,8 @@ static void prv_sleep_activity_update_session_state(
       KALG_LOG_DEBUG("Cycle rejected because too many non-zero minutes (%d pct)",
                      pct_non_zero);
 
-    } else if ((minutes_since_sleep_started > params->min_sleep_len_for_active_pct_check)
-      && (avg_vmc > params->max_avg_vmc)) {
+    } else if ((motion_quality_minutes > params->min_sleep_len_for_active_pct_check) &&
+               (avg_vmc > params->max_avg_vmc)) {
       // Too high an average VMC, reject this cycle
       // If the percentage of non-zero minutes is too high, reject this cycle.
       *sleep_end_time = sample_utc;
