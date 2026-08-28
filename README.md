@@ -34,8 +34,7 @@ for installation.
 
 - Pebble 2 Duo: `PebbleOS-asterix.pbz`
 - Pebble Time 2: `PebbleOS-obelix_dvt.pbz` or `PebbleOS-obelix_pvt.pbz`
-- Pebble Round 2: `PebbleOS-getafix_evt.pbz`, `PebbleOS-getafix_dvt.pbz`, or
-  `PebbleOS-getafix_dvt2.pbz`
+- Pebble Round 2: `PebbleOS-getafix_dvt.pbz` or `PebbleOS-getafix_dvt2.pbz`
 
 The app checks the PBZ hardware revision before transferring it, so trying the candidates for your
 product is safe. A mismatch reports both revisions, for example
