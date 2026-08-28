@@ -50,9 +50,33 @@ jobs:
           path: artifacts
 
       - name: Collect release files
+        shell: bash
         run: |
+          set -euo pipefail
+          shopt -s nullglob
           mkdir release
           find artifacts -type f -exec cp {} release/ \;
+
+          boards=(asterix obelix_dvt obelix_pvt getafix_dvt getafix_dvt2)
+          for board in "${boards[@]}"; do
+            pbzs=(release/normal_${board}_*.pbz)
+            installable=()
+            for pbz in "${pbzs[@]}"; do
+              if [[ "$pbz" != *_slot0.pbz && "$pbz" != *_slot1.pbz ]]; then
+                installable+=("$pbz")
+              fi
+            done
+            if (( ${#installable[@]} != 1 )); then
+              printf 'Expected one installable %s PBZ, found %d\n' \
+                "$board" "${#installable[@]}" >&2
+              exit 1
+            fi
+            cp "${installable[0]}" "release/PebbleOS-${board}.pbz"
+          done
+          (
+            cd release
+            sha256sum -- PebbleOS-*.pbz > SHA256SUMS
+          )
           ls -l release
 
       - name: Create release

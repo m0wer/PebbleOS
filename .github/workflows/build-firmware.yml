@@ -225,7 +225,7 @@ jobs:
           shopt -s nullglob
           release_dir=release-assets
           mkdir "$release_dir"
-          boards=(asterix obelix_dvt obelix_pvt getafix_evt getafix_dvt getafix_dvt2)
+          boards=(asterix obelix_dvt obelix_pvt getafix_dvt getafix_dvt2)
 
           obelix_pbzs=(firmware/firmware-obelix_pvt/normal_obelix_pvt_*.pbz)
           if (( ${#obelix_pbzs[@]} != 1 )); then
