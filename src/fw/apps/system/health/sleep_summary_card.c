@@ -32,6 +32,8 @@ typedef struct HealthSleepSummaryCardData {
 
 #define PROGRESS_CURRENT_COLOR (PBL_IF_COLOR_ELSE(GColorVividCerulean, GColorDarkGray))
 #define PROGRESS_SECONDARY_COLOR (PBL_IF_COLOR_ELSE(GColorVeryLightBlue, GColorBlack))
+#define PROGRESS_NAP_COLOR (PBL_IF_COLOR_ELSE(GColorTiffanyBlue, GColorDarkGray))
+#define PROGRESS_RESTFUL_NAP_COLOR (PBL_IF_COLOR_ELSE(GColorMediumAquamarine, GColorBlack))
 #define PROGRESS_TYPICAL_COLOR (PBL_IF_COLOR_ELSE(GColorYellow, GColorBlack))
 #define PROGRESS_BACKGROUND_COLOR (PBL_IF_COLOR_ELSE(GColorDarkGray, GColorClear))
 #define PROGRESS_OUTLINE_COLOR (PBL_IF_COLOR_ELSE(GColorClear, GColorBlack))
@@ -55,6 +57,10 @@ static void prv_render_sleep_sessions(GContext *ctx, HealthSleepSummaryCardData 
       fill_color = PROGRESS_CURRENT_COLOR;
     } else if (session->type == ActivitySessionType_RestfulSleep) {
       fill_color = PROGRESS_SECONDARY_COLOR;
+    } else if (session->type == ActivitySessionType_Nap) {
+      fill_color = PROGRESS_NAP_COLOR;
+    } else if (session->type == ActivitySessionType_RestfulNap) {
+      fill_color = PROGRESS_RESTFUL_NAP_COLOR;
     }
 
     if (gcolor_equal(fill_color, GColorClear)) {
