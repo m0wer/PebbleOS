@@ -162,7 +162,7 @@ void activity_sessions_prv_add_activity_session(ActivitySession *session) {
   ActivityState *state = activity_private_state();
   mutex_lock_recursive(state->mutex);
   {
-    if (!session->ongoing) {
+    if (!session->ongoing || activity_sessions_prv_is_sleep_activity(session->type)) {
       state->need_activities_saved = true;
     }
 
@@ -637,6 +637,16 @@ void activity_sessions_prv_init(SettingsFile *file, time_t utc_now) {
       WTF;
     }
     state->activity_sessions_count++;
+  }
+
+  // Preserve sleep checkpoints across restarts, but discard other ongoing sessions.
+  for (uint16_t i = 0; i < state->activity_sessions_count; i++) {
+    ActivitySession *session = &state->activity_sessions[i];
+    if (session->ongoing && activity_sessions_prv_is_sleep_activity(session->type)) {
+      session->ongoing = false;
+      state->need_activities_saved = true;
+      state->sleep_sessions_modified = true;
+    }
   }
 
   // Remove any activities that don't belong to "today" or that are ongoing

@@ -2871,6 +2871,131 @@ void test_activity__activity_sessions_ongoing_multiple(void) {
   cl_assert_equal_i(HealthActivityRun | HealthActivityWalk | HealthActivitySleep , health_service_peek_current_activities());
 }
 
+// ---------------------------------------------------------------------------------------
+void test_activity__activity_sessions_persist_ongoing_sleep(void) {
+  ActivityState *state = activity_private_state();
+  const time_t now = rtc_get_time();
+  ActivitySession session = {
+      .start_utc = now - SECONDS_PER_HOUR,
+      .length_min = 30,
+      .type = ActivitySessionType_Walk,
+      .ongoing = true,
+  };
+
+  state->need_activities_saved = false;
+  activity_sessions_prv_add_activity_session(&session);
+  cl_assert_equal_b(false, state->need_activities_saved);
+
+  session.type = ActivitySessionType_Sleep;
+  session.start_utc -= SECONDS_PER_HOUR;
+  state->need_activities_saved = false;
+  activity_sessions_prv_add_activity_session(&session);
+  cl_assert_equal_b(true, state->need_activities_saved);
+
+  session.length_min++;
+  state->need_activities_saved = false;
+  activity_sessions_prv_add_activity_session(&session);
+  cl_assert_equal_b(true, state->need_activities_saved);
+
+  session.type = ActivitySessionType_RestfulSleep;
+  session.start_utc += 30 * SECONDS_PER_MINUTE;
+  state->need_activities_saved = false;
+  activity_sessions_prv_add_activity_session(&session);
+  cl_assert_equal_b(true, state->need_activities_saved);
+
+  session.length_min++;
+  state->need_activities_saved = false;
+  activity_sessions_prv_add_activity_session(&session);
+  cl_assert_equal_b(true, state->need_activities_saved);
+
+  session.type = ActivitySessionType_Open;
+  session.start_utc += SECONDS_PER_HOUR;
+  state->need_activities_saved = false;
+  activity_sessions_prv_add_activity_session(&session);
+  cl_assert_equal_b(false, state->need_activities_saved);
+
+  session.ongoing = false;
+  state->need_activities_saved = false;
+  activity_sessions_prv_add_activity_session(&session);
+  cl_assert_equal_b(true, state->need_activities_saved);
+}
+
+// ---------------------------------------------------------------------------------------
+void test_activity__activity_sessions_restore_ongoing_sleep_checkpoints(void) {
+  const time_t now = rtc_get_time();
+  ActivitySession sessions[ACTIVITY_MAX_ACTIVITY_SESSIONS_COUNT] = {
+      {
+          .start_utc = now - 2 * SECONDS_PER_HOUR,
+          .length_min = 90,
+          .type = ActivitySessionType_Sleep,
+          .ongoing = true,
+      },
+      {
+          .start_utc = now - SECONDS_PER_HOUR,
+          .length_min = 20,
+          .type = ActivitySessionType_RestfulSleep,
+          .ongoing = true,
+      },
+      {
+          .start_utc = now - 3 * SECONDS_PER_HOUR,
+          .length_min = 10,
+          .type = ActivitySessionType_Nap,
+          .ongoing = true,
+      },
+      {
+          .start_utc = now - 2 * SECONDS_PER_HOUR,
+          .length_min = 20,
+          .type = ActivitySessionType_RestfulNap,
+          .ongoing = true,
+      },
+      {
+          .start_utc = now - SECONDS_PER_HOUR,
+          .length_min = 30,
+          .type = ActivitySessionType_Walk,
+          .ongoing = true,
+      },
+      {
+          .start_utc = now - SECONDS_PER_HOUR,
+          .length_min = 30,
+          .type = ActivitySessionType_Run,
+          .ongoing = true,
+      },
+      {
+          .start_utc = now - SECONDS_PER_HOUR,
+          .length_min = 30,
+          .type = ActivitySessionType_Open,
+          .ongoing = true,
+      },
+      {
+          .start_utc = now - SECONDS_PER_DAY,
+          .length_min = 30,
+          .type = ActivitySessionType_Sleep,
+          .ongoing = true,
+      },
+  };
+
+  SettingsFile file;
+  cl_assert_equal_i(
+      settings_file_open(&file, ACTIVITY_SETTINGS_FILE_NAME, ACTIVITY_SETTINGS_FILE_LEN),
+      S_SUCCESS);
+  ActivitySettingsKey key = ActivitySettingsKeyStoredActivities;
+  cl_assert_equal_i(settings_file_set(&file, &key, sizeof(key), sessions, sizeof(sessions)),
+                    S_SUCCESS);
+  settings_file_close(&file);
+
+  prv_activity_init_and_set_enabled(true);
+
+  ActivityState *state = activity_private_state();
+  cl_assert_equal_i(state->activity_sessions_count, 4);
+  cl_assert_equal_b(true, state->need_activities_saved);
+  cl_assert_equal_b(true, state->sleep_sessions_modified);
+  for (uint16_t i = 0; i < state->activity_sessions_count; i++) {
+    ActivitySession expected_session = sessions[i];
+    expected_session.ongoing = false;
+    cl_assert_equal_m(&state->activity_sessions[i], &expected_session, sizeof(expected_session));
+  }
+}
+
 static void prv_set_median_hr_for_minutes(int bpm, int num_minutes) {
   const int num_samples = 15;
   activity_private_state()->hr.num_samples = num_samples;
