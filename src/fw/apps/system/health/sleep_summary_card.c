@@ -31,6 +31,7 @@ typedef struct HealthSleepSummaryCardData {
   GFont number_font;
   GFont unit_font;
   GFont typical_font;
+  GFont nap_font;
   GFont em_dash_font;
 } HealthSleepSummaryCardData;
 
@@ -173,8 +174,9 @@ static void prv_render_current_sleep_text(GContext *ctx, Layer *base_layer) {
   // Mirror the pill's downshift at half the offset so the step count and
   // pill stay visually balanced. Zero on legacy-sized displays where
   // HEALTH_Y_OFFSET itself is 0.
-  const int y = PBL_IF_RECT_ELSE(PBL_IF_BW_ELSE(85, 83), 88) + HEALTH_Y_OFFSET
-                + HEALTH_Y_OFFSET / 6;
+  const bool has_nap = (health_data_current_nap_get(data->health_data) > 0);
+  const int y = PBL_IF_RECT_ELSE(PBL_IF_BW_ELSE(85, 83), 88) + HEALTH_Y_OFFSET +
+                HEALTH_Y_OFFSET / 6 - (has_nap ? 4 : 0);
   const GRect rect = GRect(0, y, base_layer->bounds.size.w, 40);
 
   const int current_sleep = health_data_current_sleep_get(data->health_data);
@@ -196,6 +198,28 @@ static void prv_render_current_sleep_text(GContext *ctx, Layer *base_layer) {
     graphics_context_set_text_color(ctx, CURRENT_TEXT_COLOR);
     graphics_draw_text(ctx, buffer, font, rect, GTextOverflowModeFill, GTextAlignmentCenter, NULL);
   }
+}
+
+static void prv_render_nap_text(GContext *ctx, Layer *base_layer) {
+  HealthSleepSummaryCardData *data = layer_get_data(base_layer);
+  const int current_nap = health_data_current_nap_get(data->health_data);
+  if (current_nap <= 0) {
+    return;
+  }
+
+  char duration_text[16];
+  health_util_format_hours_and_minutes(duration_text, sizeof(duration_text), current_nap,
+                                       base_layer);
+
+  char nap_text[48];
+  snprintf(nap_text, sizeof(nap_text), "%s %s", i18n_get("Nap Time", base_layer), duration_text);
+
+  const int sleep_text_y =
+      PBL_IF_RECT_ELSE(PBL_IF_BW_ELSE(85, 83), 88) + HEALTH_Y_OFFSET + HEALTH_Y_OFFSET / 6;
+  const GRect rect = GRect(0, sleep_text_y + 27, base_layer->bounds.size.w, 16);
+  graphics_context_set_text_color(ctx, PROGRESS_NAP_COLOR);
+  graphics_draw_text(ctx, nap_text, data->nap_font, rect, GTextOverflowModeFill,
+                     GTextAlignmentCenter, NULL);
 }
 
 static void prv_render_typical_sleep_text(GContext *ctx, Layer *base_layer) {
@@ -229,7 +253,7 @@ static void prv_render_no_sleep_data_text(GContext *ctx, Layer *base_layer) {
 
 static bool prv_has_sleep_data(HealthData *health_data) {
   // daily weekly stats doesn't include the first index so we check that separately
-  return health_data_current_sleep_get(health_data) ||
+  return health_data_current_sleep_get(health_data) || health_data_current_nap_get(health_data) ||
          health_data_sleep_get_monthly_average(health_data) > 0;
 }
 
@@ -246,6 +270,8 @@ static void prv_base_layer_update_proc(Layer *base_layer, GContext *ctx) {
   }
 
   prv_render_current_sleep_text(ctx, base_layer);
+
+  prv_render_nap_text(ctx, base_layer);
 
   prv_render_typical_sleep_text(ctx, base_layer);
 }
@@ -281,6 +307,7 @@ Layer *health_sleep_summary_card_create(HealthData *health_data) {
     .typical_font = fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD),
     .em_dash_font = fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD),
   };
+  health_sleep_summary_card_data->nap_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
   return base_layer;
 }
 

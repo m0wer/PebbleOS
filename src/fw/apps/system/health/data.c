@@ -257,6 +257,17 @@ int32_t health_data_current_sleep_get(HealthData *health_data) {
   return health_data->sleep_data[0];
 }
 
+int32_t health_data_current_nap_get(HealthData *health_data) {
+  int32_t nap_duration = 0;
+  for (unsigned int i = 0; i < health_data->num_activity_sessions; i++) {
+    const ActivitySession *session = &health_data->activity_sessions[i];
+    if (session->type == ActivitySessionType_Nap) {
+      nap_duration += session->length_min * SECONDS_PER_MINUTE;
+    }
+  }
+  return nap_duration;
+}
+
 int32_t health_data_sleep_get_cur_wday_average(HealthData *health_data) {
   return health_data->typical_sleep;
 }
