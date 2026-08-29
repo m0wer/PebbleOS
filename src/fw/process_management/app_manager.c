@@ -2,6 +2,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 
 #include "app_manager.h"
+#include "app_cpu_watchdog.h"
 #include "process_loader.h"
 
 // Pebble stuff
@@ -92,6 +93,7 @@ static NextApp s_next_app;
 void app_manager_init(void) {
   s_initialized = true;
   s_app_task_context = (ProcessContext) { 0 };
+  app_cpu_watchdog_init();
 }
 
 // ---------------------------------------------------------------------------------------------

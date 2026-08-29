@@ -40,6 +40,38 @@ static uint32_t prv_read_task_run_time(const struct pbl_thread *thread) {
   return 0;
 }
 
+bool pebble_task_get_runtime_snapshot(PebbleTaskRuntimeSnapshot *snapshot) {
+  if (!snapshot) {
+    return false;
+  }
+
+  *snapshot = (PebbleTaskRuntimeSnapshot){0};
+
+  // Snapshot dead-task cycles before walking the live task list. Combined with
+  // the clear-handle ordering in pebble_task_unregister(), this avoids double
+  // counting when a task exits during collection.
+  for (int task = 0; task < NumPebbleTask; task++) {
+    snapshot->task_run_time[task] = s_dead_task_cycles[task];
+  }
+
+  struct pbl_thread_stats stats[CONFIG_KERNEL_MAX_THREADS];
+  size_t count = pbl_thread_stats_snapshot(stats, ARRAY_LENGTH(stats), &snapshot->total_run_time);
+  struct pbl_thread *idle_thread = pbl_thread_idle();
+  for (size_t i = 0; i < count; i++) {
+    if (stats[i].thread == idle_thread) {
+      snapshot->idle_run_time = stats[i].run_time;
+      continue;
+    }
+
+    PebbleTask task = pebble_task_get_task_for_thread(stats[i].thread);
+    if (task < NumPebbleTask) {
+      snapshot->task_run_time[task] += stats[i].run_time;
+    }
+  }
+
+  return true;
+}
+
 void pebble_task_unregister(PebbleTask task) {
   struct pbl_thread *thread = g_task_threads[task];
   if (thread == NULL) {
@@ -154,55 +186,26 @@ static const enum pbl_analytics_key s_task_cpu_pct_keys[NumPebbleTask] = {
 };
 
 void pbl_analytics_external_collect_task_cpu_stats(void) {
-  static uint32_t s_prev_total_task_cycles[NumPebbleTask];
-  static uint32_t s_prev_idle_run_time;
-  static uint32_t s_prev_total_run_time;
-
-  // Snapshot dead-task cycles before walking the live task list. Combined with
-  // the (clear-handle, then update-accumulator) ordering in
-  // pebble_task_unregister(), this guarantees that cycles from a task dying
-  // mid-collection are never double-counted; in the worst case they show up
-  // one heartbeat late.
-  uint32_t dead_cycles[NumPebbleTask];
-  for (int task = 0; task < NumPebbleTask; task++) {
-    dead_cycles[task] = s_dead_task_cycles[task];
+  static PebbleTaskRuntimeSnapshot s_previous;
+  PebbleTaskRuntimeSnapshot current;
+  if (!pebble_task_get_runtime_snapshot(&current)) {
+    return;
   }
 
-  struct pbl_thread_stats stats[CONFIG_KERNEL_MAX_THREADS];
-  uint32_t total_run_time;
-  size_t count = pbl_thread_stats_snapshot(stats, ARRAY_LENGTH(stats), &total_run_time);
-
-  uint32_t delta_total = total_run_time - s_prev_total_run_time;
-  s_prev_total_run_time = total_run_time;
-
-  struct pbl_thread *idle_thread = pbl_thread_idle();
-  uint32_t curr_task_run_time[NumPebbleTask] = {0};
-  uint32_t curr_idle_run_time = 0;
-
-  for (size_t i = 0; i < count; i++) {
-    if (stats[i].thread == idle_thread) {
-      curr_idle_run_time = stats[i].run_time;
-      continue;
-    }
-    PebbleTask task = pebble_task_get_task_for_thread(stats[i].thread);
-    if (task < NumPebbleTask) {
-      curr_task_run_time[task] = stats[i].run_time;
-    }
-  }
+  uint32_t delta_total = current.total_run_time - s_previous.total_run_time;
 
   for (int task = 0; task < NumPebbleTask; task++) {
-    uint32_t total = dead_cycles[task] + curr_task_run_time[task];
-    uint32_t delta = total - s_prev_total_task_cycles[task];
-    s_prev_total_task_cycles[task] = total;
+    uint32_t delta = current.task_run_time[task] - s_previous.task_run_time[task];
     uint32_t pct = delta_total ? (uint32_t)(((uint64_t)delta * 10000U) / delta_total) : 0;
     sys_pbl_analytics_set_unsigned(s_task_cpu_pct_keys[task], pct);
   }
 
-  uint32_t idle_delta = curr_idle_run_time - s_prev_idle_run_time;
-  s_prev_idle_run_time = curr_idle_run_time;
+  uint32_t idle_delta = current.idle_run_time - s_previous.idle_run_time;
   uint32_t idle_pct =
       delta_total ? (uint32_t)(((uint64_t)idle_delta * 10000U) / delta_total) : 0;
   PBL_ANALYTICS_SET_UNSIGNED(task_cpu_idle_pct, idle_pct);
+
+  s_previous = current;
 }
 
 struct pbl_msgq *pebble_task_get_to_queue(PebbleTask task) {
