@@ -5,6 +5,7 @@
 
 #include "kernel/memory_layout.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "freertos_types.h"
@@ -33,6 +34,12 @@ typedef enum PebbleTask {
 
 typedef uint16_t PebbleTaskBitset;
 
+typedef struct {
+  uint32_t total_run_time;
+  uint32_t task_run_time[NumPebbleTask];
+  uint32_t idle_run_time;
+} PebbleTaskRuntimeSnapshot;
+
 _Static_assert((1 << (8*sizeof(PebbleTaskBitset))) >= (1 << NumPebbleTask),
                "The type of PebbleTaskBitset is not wide enough to "
                "track all tasks in the PebbleTask enum");
@@ -59,3 +66,7 @@ void pebble_task_create(PebbleTask pebble_task, TaskParameters_t *task_params,
                         TaskHandle_t *handle);
 
 void pebble_task_configure_idle_task(void);
+
+//! Collects cumulative runtime counters for registered and recently destroyed tasks.
+//! Callers must retain their own previous snapshot when calculating interval usage.
+bool pebble_task_get_runtime_snapshot(PebbleTaskRuntimeSnapshot *snapshot);

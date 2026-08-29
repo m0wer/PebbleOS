@@ -223,6 +223,10 @@ clar(ctx,
     test_sources_ant_glob = "test_memory_layout.c")
 
 clar(ctx,
+    sources_ant_glob = "src/fw/process_management/app_cpu_watchdog.c",
+    test_sources_ant_glob = "test_app_cpu_watchdog.c")
+
+clar(ctx,
    sources_ant_glob = \
        " src/fw/applib/app_exit_reason.c" \
        " src/fw/util/rand/rand.c" \
