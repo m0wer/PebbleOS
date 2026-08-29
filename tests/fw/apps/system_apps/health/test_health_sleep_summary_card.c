@@ -292,7 +292,7 @@ void test_health_sleep_summary_card__render_sleep_with_nap(void) {
       .activity_sessions[2] =
           {
               .start_utc = start_of_today + (14 * SECONDS_PER_HOUR),
-              .length_min = (1 * MINUTES_PER_HOUR),
+              .length_min = 28,
               .type = ActivitySessionType_Nap,
           },
       .activity_sessions[3] =
@@ -303,6 +303,7 @@ void test_health_sleep_summary_card__render_sleep_with_nap(void) {
           },
   };
 
+  cl_assert_equal_i(health_data_current_nap_get(&health_data), 28 * SECONDS_PER_MINUTE);
   prv_create_card_and_render(&health_data);
   cl_check(gbitmap_pbi_eq(&s_ctx.dest_bitmap, TEST_PBI_FILE));
 }

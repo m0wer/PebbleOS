@@ -62,6 +62,14 @@ static void prv_set_deep_sleep(char *buffer, size_t buffer_size, int32_t sleep_d
   health_util_format_hours_and_minutes(buffer, buffer_size, sleep_duration, i18n_owner);
 }
 
+static void prv_set_nap_time(char *buffer, size_t buffer_size, int32_t nap_duration,
+                             void *i18n_owner) {
+  char duration_text[16];
+  health_util_format_hours_and_minutes(duration_text, sizeof(duration_text), nap_duration,
+                                       i18n_owner);
+  snprintf(buffer, buffer_size, "%s %s", i18n_get("Nap Time", i18n_owner), duration_text);
+}
+
 static void prv_set_avg(char *buffer, size_t buffer_size, int32_t daily_avg, void *i18n_owner) {
 #if PBL_ROUND
   int avg_len = snprintf(buffer, buffer_size, "%s\n", i18n_get("30 DAY AVG", i18n_owner));
@@ -76,6 +84,23 @@ static void prv_set_avg(char *buffer, size_t buffer_size, int32_t daily_avg, voi
                                          daily_avg, i18n_owner);
   }
 }
+
+#if PBL_ROUND
+static void prv_set_nap_and_avg(char *buffer, size_t buffer_size, int32_t nap_duration,
+                                int32_t daily_avg, void *i18n_owner) {
+  char nap_text[16];
+  char avg_text[16];
+  health_util_format_hours_and_minutes(nap_text, sizeof(nap_text), nap_duration, i18n_owner);
+  if (daily_avg <= 0) {
+    snprintf(avg_text, sizeof(avg_text), EM_DASH);
+  } else {
+    health_util_format_hours_and_minutes(avg_text, sizeof(avg_text), daily_avg, i18n_owner);
+  }
+
+  snprintf(buffer, buffer_size, "%s %s\n%s %s", i18n_get("Nap Time", i18n_owner), nap_text,
+           i18n_get("30 DAY AVG", i18n_owner), avg_text);
+}
+#endif
 
 Window *health_sleep_detail_card_create(HealthData *health_data) {
   HealthSleepDetailCardData *card_data = app_zalloc_check(sizeof(HealthSleepDetailCardData));
@@ -124,6 +149,18 @@ Window *health_sleep_detail_card_create(HealthData *health_data) {
   prv_set_deep_sleep(heading->primary_value, buffer_len,
                      health_data_current_deep_sleep_get(health_data), card_data);
 
+  const int32_t current_nap = health_data_current_nap_get(health_data);
+#if PBL_RECT
+  if (current_nap > 0) {
+    HealthDetailSubtitle *subtitle = &card_data->subtitles[card_data->num_subtitles++];
+    *subtitle = (HealthDetailSubtitle){
+        .label = app_zalloc_check(buffer_len),
+        .fill_color = PBL_IF_COLOR_ELSE(GColorTiffanyBlue, GColorBlack),
+    };
+    prv_set_nap_time(subtitle->label, buffer_len, current_nap, card_data);
+  }
+#endif
+
   HealthDetailSubtitle *subtitle = &card_data->subtitles[card_data->num_subtitles++];
 
   *subtitle = (HealthDetailSubtitle) {
@@ -131,7 +168,15 @@ Window *health_sleep_detail_card_create(HealthData *health_data) {
     .fill_color = PBL_IF_COLOR_ELSE(GColorYellow, GColorBlack),
   };
 
+#if PBL_ROUND
+  if (current_nap > 0) {
+    prv_set_nap_and_avg(subtitle->label, buffer_len, current_nap, card_data->daily_avg, card_data);
+  } else {
+    prv_set_avg(subtitle->label, buffer_len, card_data->daily_avg, card_data);
+  }
+#else
   prv_set_avg(subtitle->label, buffer_len, card_data->daily_avg, card_data);
+#endif
 
   const HealthDetailCardConfig config = {
     .num_headings = card_data->num_headings,
