@@ -62,6 +62,7 @@ static void prv_set_deep_sleep(char *buffer, size_t buffer_size, int32_t sleep_d
   health_util_format_hours_and_minutes(buffer, buffer_size, sleep_duration, i18n_owner);
 }
 
+#if PBL_RECT
 static void prv_set_nap_time(char *buffer, size_t buffer_size, int32_t nap_duration,
                              void *i18n_owner) {
   char duration_text[16];
@@ -69,6 +70,7 @@ static void prv_set_nap_time(char *buffer, size_t buffer_size, int32_t nap_durat
                                        i18n_owner);
   snprintf(buffer, buffer_size, "%s %s", i18n_get("Nap Time", i18n_owner), duration_text);
 }
+#endif
 
 static void prv_set_avg(char *buffer, size_t buffer_size, int32_t daily_avg, void *i18n_owner) {
 #if PBL_ROUND
@@ -121,6 +123,11 @@ Window *health_sleep_detail_card_create(HealthData *health_data) {
                                           card_data);
 
   const size_t buffer_len = 32;
+#if PBL_ROUND
+  const size_t subtitle_buffer_len = 64;
+#else
+  const size_t subtitle_buffer_len = buffer_len;
+#endif
 
   HealthDetailHeading *heading = &card_data->headings[card_data->num_headings++];
 
@@ -154,28 +161,29 @@ Window *health_sleep_detail_card_create(HealthData *health_data) {
   if (current_nap > 0) {
     HealthDetailSubtitle *subtitle = &card_data->subtitles[card_data->num_subtitles++];
     *subtitle = (HealthDetailSubtitle){
-        .label = app_zalloc_check(buffer_len),
+        .label = app_zalloc_check(subtitle_buffer_len),
         .fill_color = PBL_IF_COLOR_ELSE(GColorTiffanyBlue, GColorBlack),
     };
-    prv_set_nap_time(subtitle->label, buffer_len, current_nap, card_data);
+    prv_set_nap_time(subtitle->label, subtitle_buffer_len, current_nap, card_data);
   }
 #endif
 
   HealthDetailSubtitle *subtitle = &card_data->subtitles[card_data->num_subtitles++];
 
-  *subtitle = (HealthDetailSubtitle) {
-    .label = app_zalloc_check(buffer_len),
-    .fill_color = PBL_IF_COLOR_ELSE(GColorYellow, GColorBlack),
+  *subtitle = (HealthDetailSubtitle){
+      .label = app_zalloc_check(subtitle_buffer_len),
+      .fill_color = PBL_IF_COLOR_ELSE(GColorYellow, GColorBlack),
   };
 
 #if PBL_ROUND
   if (current_nap > 0) {
-    prv_set_nap_and_avg(subtitle->label, buffer_len, current_nap, card_data->daily_avg, card_data);
+    prv_set_nap_and_avg(subtitle->label, subtitle_buffer_len, current_nap, card_data->daily_avg,
+                        card_data);
   } else {
-    prv_set_avg(subtitle->label, buffer_len, card_data->daily_avg, card_data);
+    prv_set_avg(subtitle->label, subtitle_buffer_len, card_data->daily_avg, card_data);
   }
 #else
-  prv_set_avg(subtitle->label, buffer_len, card_data->daily_avg, card_data);
+  prv_set_avg(subtitle->label, subtitle_buffer_len, card_data->daily_avg, card_data);
 #endif
 
   const HealthDetailCardConfig config = {
