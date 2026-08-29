@@ -134,6 +134,8 @@ void app_install_release_md(const PebbleProcessMd *md) {
 // Stubs
 ///////////////////////////////////////////////////////////
 
+void app_cpu_watchdog_init(void) {}
+
 char __APP_RAM__[1024*128];
 char __APP_RAM_end__;
 char __WORKER_RAM__[1024*12];

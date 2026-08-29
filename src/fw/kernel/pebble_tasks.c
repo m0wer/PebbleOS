@@ -45,6 +45,44 @@ static uint32_t prv_read_task_run_time(TaskHandle_t handle) {
   return cycles;
 }
 
+bool pebble_task_get_runtime_snapshot(PebbleTaskRuntimeSnapshot *snapshot) {
+  if (!snapshot) {
+    return false;
+  }
+
+  *snapshot = (PebbleTaskRuntimeSnapshot){0};
+
+  // Snapshot dead-task cycles before walking the live task list. Combined with
+  // the clear-handle ordering in pebble_task_unregister(), this avoids double
+  // counting when a task exits during collection.
+  for (int task = 0; task < NumPebbleTask; task++) {
+    snapshot->task_run_time[task] = s_dead_task_cycles[task];
+  }
+
+  UBaseType_t num_tasks = uxTaskGetNumberOfTasks();
+  TaskStatus_t *statuses = kernel_malloc(num_tasks * sizeof(TaskStatus_t));
+  if (!statuses) {
+    return false;
+  }
+
+  UBaseType_t count = uxTaskGetSystemState(statuses, num_tasks, &snapshot->total_run_time);
+  TaskHandle_t idle_handle = xTaskGetIdleTaskHandle();
+  for (UBaseType_t i = 0; i < count; i++) {
+    if (statuses[i].xHandle == idle_handle) {
+      snapshot->idle_run_time = statuses[i].ulRunTimeCounter;
+      continue;
+    }
+
+    PebbleTask task = pebble_task_get_task_for_handle(statuses[i].xHandle);
+    if (task < NumPebbleTask) {
+      snapshot->task_run_time[task] += statuses[i].ulRunTimeCounter;
+    }
+  }
+
+  kernel_free(statuses);
+  return true;
+}
+
 void pebble_task_unregister(PebbleTask task) {
   TaskHandle_t handle = g_task_handles[task];
   if (handle == NULL) {
@@ -155,61 +193,26 @@ static const enum pbl_analytics_key s_task_cpu_pct_keys[NumPebbleTask] = {
 };
 
 void pbl_analytics_external_collect_task_cpu_stats(void) {
-  static uint32_t s_prev_total_task_cycles[NumPebbleTask];
-  static uint32_t s_prev_idle_run_time;
-  static uint32_t s_prev_total_run_time;
-
-  // Snapshot dead-task cycles before walking the live task list. Combined with
-  // the (clear-handle, then update-accumulator) ordering in
-  // pebble_task_unregister(), this guarantees that cycles from a task dying
-  // mid-collection are never double-counted; in the worst case they show up
-  // one heartbeat late.
-  uint32_t dead_cycles[NumPebbleTask];
-  for (int task = 0; task < NumPebbleTask; task++) {
-    dead_cycles[task] = s_dead_task_cycles[task];
-  }
-
-  UBaseType_t num_tasks = uxTaskGetNumberOfTasks();
-  TaskStatus_t *statuses = kernel_malloc(num_tasks * sizeof(TaskStatus_t));
-  if (!statuses) {
+  static PebbleTaskRuntimeSnapshot s_previous;
+  PebbleTaskRuntimeSnapshot current;
+  if (!pebble_task_get_runtime_snapshot(&current)) {
     return;
   }
 
-  uint32_t total_run_time;
-  UBaseType_t count = uxTaskGetSystemState(statuses, num_tasks, &total_run_time);
-
-  uint32_t delta_total = total_run_time - s_prev_total_run_time;
-  s_prev_total_run_time = total_run_time;
-
-  TaskHandle_t idle_handle = xTaskGetIdleTaskHandle();
-  uint32_t curr_task_run_time[NumPebbleTask] = {0};
-  uint32_t curr_idle_run_time = 0;
-  for (UBaseType_t i = 0; i < count; i++) {
-    if (statuses[i].xHandle == idle_handle) {
-      curr_idle_run_time = statuses[i].ulRunTimeCounter;
-      continue;
-    }
-    PebbleTask task = pebble_task_get_task_for_handle(statuses[i].xHandle);
-    if (task < NumPebbleTask) {
-      curr_task_run_time[task] = statuses[i].ulRunTimeCounter;
-    }
-  }
-
-  kernel_free(statuses);
+  uint32_t delta_total = current.total_run_time - s_previous.total_run_time;
 
   for (int task = 0; task < NumPebbleTask; task++) {
-    uint32_t total = dead_cycles[task] + curr_task_run_time[task];
-    uint32_t delta = total - s_prev_total_task_cycles[task];
-    s_prev_total_task_cycles[task] = total;
+    uint32_t delta = current.task_run_time[task] - s_previous.task_run_time[task];
     uint32_t pct = delta_total ? (uint32_t)(((uint64_t)delta * 10000U) / delta_total) : 0;
     sys_pbl_analytics_set_unsigned(s_task_cpu_pct_keys[task], pct);
   }
 
-  uint32_t idle_delta = curr_idle_run_time - s_prev_idle_run_time;
-  s_prev_idle_run_time = curr_idle_run_time;
+  uint32_t idle_delta = current.idle_run_time - s_previous.idle_run_time;
   uint32_t idle_pct =
       delta_total ? (uint32_t)(((uint64_t)idle_delta * 10000U) / delta_total) : 0;
   PBL_ANALYTICS_SET_UNSIGNED(task_cpu_idle_pct, idle_pct);
+
+  s_previous = current;
 }
 
 QueueHandle_t pebble_task_get_to_queue(PebbleTask task) {

@@ -235,6 +235,11 @@ pbl_clar_test(test_memory_layout
     src/fw/kernel/memory_layout.c
 )
 
+pbl_clar_test(test_app_cpu_watchdog
+  SOURCES
+    src/fw/process_management/app_cpu_watchdog.c
+)
+
 pbl_clar_test(test_app_manager
   SOURCES
     src/fw/applib/app_exit_reason.c
