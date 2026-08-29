@@ -103,6 +103,27 @@ void test_health_sleep_detail_card__render_deep_sleep(void) {
   cl_check(gbitmap_pbi_eq(&s_ctx.dest_bitmap, TEST_PBI_FILE));
 }
 
+void test_health_sleep_detail_card__render_nap_time(void) {
+  HealthData health_data = {
+      .monthly_sleep_average = (8 * SECONDS_PER_HOUR) + (17 * SECONDS_PER_MINUTE),
+      .num_activity_sessions = 2,
+      .activity_sessions[0] =
+          {
+              .length_min = 28,
+              .type = ActivitySessionType_Nap,
+          },
+      .activity_sessions[1] =
+          {
+              .length_min = 30,
+              .type = ActivitySessionType_RestfulNap,
+          },
+  };
+
+  cl_assert_equal_i(health_data_current_nap_get(&health_data), 28 * SECONDS_PER_MINUTE);
+  prv_create_card_and_render(&health_data);
+  cl_check(gbitmap_pbi_eq(&s_ctx.dest_bitmap, TEST_PBI_FILE));
+}
+
 void test_health_sleep_detail_card__render_sleep_data_1(void) {
   HealthData health_data = {
     .sleep_data[0] = (7 * SECONDS_PER_HOUR) + (11 * SECONDS_PER_MINUTE),
