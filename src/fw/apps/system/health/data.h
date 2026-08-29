@@ -116,6 +116,11 @@ int32_t *health_data_sleep_get(HealthData *health_data);
 //! @return the current sleep length
 int32_t health_data_current_sleep_get(HealthData *health_data);
 
+//! Get the total duration of today's detected naps
+//! @param health_data A pointer to the health data to use
+//! @return the current nap length
+int32_t health_data_current_nap_get(HealthData *health_data);
+
 //! Gets the typical sleep duration for the current weekday
 int32_t health_data_sleep_get_cur_wday_average(HealthData *health_data);
 
