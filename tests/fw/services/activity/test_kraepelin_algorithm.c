@@ -1398,8 +1398,20 @@ typedef struct {
   uint16_t len_m;
 } KAlgTestSleepSession;
 
+#define MAX_SYNTH_PARENT_EVENTS 8
+
+typedef struct {
+  time_t start_utc;
+  uint16_t len_m;
+} KAlgTestSleepParentEvent;
+
 KAlgTestSleepSession s_captured_sleep_sessions[MAX_CAPTURED_SESSIONS];
 int s_num_captured_sleep_sessions;
+KAlgTestSleepParentEvent s_synth_final_parent_events[MAX_SYNTH_PARENT_EVENTS];
+int s_num_synth_final_parent_events;
+int s_num_synth_parent_deletes;
+time_t s_synth_last_deleted_parent_start_utc;
+bool s_capture_synth_parent_events;
 void prv_sleep_session_callback(void *context, KAlgActivityType activity_type,
                                 time_t start_utc, uint32_t len_sec, bool ongoing, bool delete,
                                 uint32_t steps, uint32_t resting_calories, uint32_t active_calories,
@@ -1410,6 +1422,19 @@ void prv_sleep_session_callback(void *context, KAlgActivityType activity_type,
   // If not a sleep session, ignore it
   if (activity_type != KAlgActivityType_Sleep && activity_type != KAlgActivityType_RestfulSleep) {
     return;
+  }
+
+  if (s_capture_synth_parent_events && activity_type == KAlgActivityType_Sleep) {
+    if (delete) {
+      s_num_synth_parent_deletes++;
+      s_synth_last_deleted_parent_start_utc = start_utc;
+    } else if (!ongoing) {
+      cl_assert(s_num_synth_final_parent_events < MAX_SYNTH_PARENT_EVENTS);
+      s_synth_final_parent_events[s_num_synth_final_parent_events++] = (KAlgTestSleepParentEvent) {
+        .start_utc = start_utc,
+        .len_m = len_sec / SECONDS_PER_MINUTE,
+      };
+    }
   }
 
   // Look for an existing session
@@ -2364,10 +2389,15 @@ static void prv_synth_start(void) {
   s_kalg_state = kernel_zalloc(kalg_state_size());
   kalg_init(s_kalg_state, prv_stats_cb);
   s_num_captured_sleep_sessions = 0;
+  s_num_synth_final_parent_events = 0;
+  s_num_synth_parent_deletes = 0;
+  s_synth_last_deleted_parent_start_utc = 0;
+  s_capture_synth_parent_events = true;
   s_synth_diagnostic_flags = 0;
 }
 
 static void prv_synth_end(void) {
+  s_capture_synth_parent_events = false;
   kernel_free(s_kalg_state);
   s_kalg_state = NULL;
 }
@@ -2433,6 +2463,30 @@ static void prv_synth_motion(int minutes) {
   }
 }
 
+static void prv_synth_intent_motion(int minutes) {
+  static const uint8_t k_orientations[] = {0x41, 0x62, 0x73, 0x54};
+  for (int i = 0; i < minutes; i++) {
+    prv_synth_minute(4000, k_orientations[i % 4], false /*definitely_not_worn*/,
+                     false /*definitely_worn*/, true /*sleep_intent_hint*/);
+  }
+}
+
+static void prv_synth_intent_motion_with_false_intent(int minutes, int false_intent_minute) {
+  static const uint8_t k_orientations[] = {0x41, 0x62, 0x73, 0x54};
+  for (int i = 0; i < minutes; i++) {
+    prv_synth_minute(4000, k_orientations[i % 4], false /*definitely_not_worn*/,
+                     false /*definitely_worn*/, i != false_intent_minute);
+  }
+}
+
+static void prv_synth_intent_motion_with_not_worn(int minutes, int not_worn_minute) {
+  static const uint8_t k_orientations[] = {0x41, 0x62, 0x73, 0x54};
+  for (int i = 0; i < minutes; i++) {
+    prv_synth_minute(4000, k_orientations[i % 4], i == not_worn_minute,
+                     false /*definitely_worn*/, true /*sleep_intent_hint*/);
+  }
+}
+
 static void prv_synth_table(int minutes, bool sleep_intent_hint) {
   for (int i = 0; i < minutes; i++) {
     prv_synth_minute(0, 0x05, true /*definitely_not_worn*/, false /*definitely_worn*/,
@@ -2466,6 +2520,20 @@ static uint16_t prv_synth_longest_container_minutes(void) {
     }
   }
   return longest;
+}
+
+static KAlgTestSleepSession *prv_synth_parent_session(int index) {
+  int parent_index = 0;
+  for (int i = 0; i < s_num_captured_sleep_sessions; i++) {
+    if (s_captured_sleep_sessions[i].activity != KAlgActivityType_Sleep) {
+      continue;
+    }
+    if (parent_index == index) {
+      return &s_captured_sleep_sessions[i];
+    }
+    parent_index++;
+  }
+  return NULL;
 }
 
 void test_kraepelin_algorithm__fragmented_short_cycle_requires_follower(void) {
@@ -2595,6 +2663,89 @@ void test_kraepelin_algorithm__long_sleep_continues_after_bed_movement(void) {
   prv_synth_motion(20);
 
   cl_assert_equal_i(prv_synth_container_count(), 2);
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__intent_bridge_merges_three_long_cycles(void) {
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_sleep(74, false /*definitely_not_worn*/, true /*sleep_intent_hint*/);
+  prv_synth_intent_motion(76);
+
+  cl_assert_equal_i(prv_synth_container_count(), 1);
+  cl_assert_equal_i(s_num_synth_final_parent_events, 1);
+  const KAlgTestSleepParentEvent first_parent = s_synth_final_parent_events[0];
+
+  prv_synth_sleep(265, false /*definitely_not_worn*/, true /*sleep_intent_hint*/);
+  prv_synth_intent_motion(40);
+  cl_assert_equal_i(prv_synth_container_count(), 1);
+  cl_assert_equal_i(s_num_synth_parent_deletes, 1);
+  cl_assert_equal_i(s_synth_last_deleted_parent_start_utc, first_parent.start_utc);
+  cl_assert_equal_i(s_num_synth_final_parent_events, 2);
+  cl_assert_equal_i(s_synth_final_parent_events[1].start_utc, first_parent.start_utc);
+
+  prv_synth_sleep(55, false /*definitely_not_worn*/, true /*sleep_intent_hint*/);
+  prv_synth_intent_motion(20);
+
+  cl_assert_equal_i(prv_synth_container_count(), 1);
+  cl_assert_equal_i(s_num_synth_parent_deletes, 2);
+  cl_assert_equal_i(s_synth_last_deleted_parent_start_utc, first_parent.start_utc);
+  cl_assert_equal_i(s_num_synth_final_parent_events, 3);
+  cl_assert_equal_i(s_synth_final_parent_events[2].start_utc, first_parent.start_utc);
+  cl_assert(s_synth_final_parent_events[2].len_m >
+            s_synth_final_parent_events[1].len_m + 40 + 50);
+  KAlgTestSleepSession *parent = prv_synth_parent_session(0);
+  cl_assert(parent != NULL);
+  cl_assert_equal_i(parent->start_utc, first_parent.start_utc);
+  cl_assert_equal_i(parent->len_m, s_synth_final_parent_events[2].len_m);
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__intent_bridge_cancels_on_false_intent(void) {
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_sleep(74, false /*definitely_not_worn*/, true /*sleep_intent_hint*/);
+  prv_synth_intent_motion_with_false_intent(76, 38);
+  prv_synth_sleep(265, false /*definitely_not_worn*/, true /*sleep_intent_hint*/);
+  prv_synth_intent_motion(20);
+
+  cl_assert_equal_i(prv_synth_container_count(), 2);
+  cl_assert_equal_i(s_num_synth_parent_deletes, 0);
+  cl_assert_equal_i(s_num_synth_final_parent_events, 2);
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__intent_bridge_cancels_on_not_worn(void) {
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_sleep(74, false /*definitely_not_worn*/, true /*sleep_intent_hint*/);
+  prv_synth_intent_motion_with_not_worn(76, 38);
+  prv_synth_sleep(265, false /*definitely_not_worn*/, true /*sleep_intent_hint*/);
+  prv_synth_intent_motion(20);
+
+  cl_assert_equal_i(prv_synth_container_count(), 2);
+  cl_assert_equal_i(s_num_synth_parent_deletes, 0);
+  cl_assert(s_synth_diagnostic_flags & KAlgSleepDiagnosticFlag_DefinitelyNotWornInput);
+  cl_assert(s_synth_diagnostic_flags & KAlgSleepDiagnosticFlag_ComputedNotWorn);
+  prv_synth_end();
+}
+
+void test_kraepelin_algorithm__intent_bridge_cancels_after_90_minutes(void) {
+  prv_synth_start();
+  prv_synth_motion(20);
+  prv_synth_sleep(74, false /*definitely_not_worn*/, true /*sleep_intent_hint*/);
+  // The filter offsets make this an observed 91-minute gap.
+  prv_synth_intent_motion(85);
+  prv_synth_sleep(265, false /*definitely_not_worn*/, true /*sleep_intent_hint*/);
+  prv_synth_intent_motion(20);
+
+  cl_assert_equal_i(prv_synth_container_count(), 2);
+  cl_assert_equal_i(s_num_synth_parent_deletes, 0);
+  cl_assert_equal_i(s_num_synth_final_parent_events, 2);
+  cl_assert_equal_i(s_synth_final_parent_events[1].start_utc -
+                    (s_synth_final_parent_events[0].start_utc +
+                     s_synth_final_parent_events[0].len_m * SECONDS_PER_MINUTE),
+                    91 * SECONDS_PER_MINUTE);
   prv_synth_end();
 }
 
