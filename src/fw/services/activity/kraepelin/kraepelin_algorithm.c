@@ -149,11 +149,12 @@ typedef struct {
   uint16_t consecutive_awake_intent_minutes;
   uint16_t num_non_zero_awake_tail;
   uint32_t vmc_sum_awake_tail;
+  uint16_t definitely_not_worn_awake_tail;
+  uint16_t not_worn_awake_tail;
 #ifdef CONFIG_HRM
   uint16_t worn_evidence_minutes;
   uint16_t definitely_not_worn_minutes;
   uint16_t worn_evidence_awake_tail;
-  uint16_t definitely_not_worn_awake_tail;
   uint16_t consecutive_sleep_worn_evidence_minutes;
   uint16_t consecutive_sleep_definitely_not_worn_minutes;
 #endif
@@ -179,6 +180,10 @@ typedef struct {
 
   time_t confirmed_cycle_end_utc;
   KAlgPendingSleepCycle pending_cycle;
+
+  time_t intent_bridge_start_utc;
+  time_t intent_bridge_end_utc;
+  bool intent_bridge_continuity_valid;
 } KAlgSleepActivityState;
 
 // Params used for sleep detection
@@ -223,6 +228,7 @@ typedef struct {
 
   uint16_t min_short_sleep_cycle_len_minutes;
   uint16_t max_fragmented_sleep_gap_minutes;
+  uint16_t max_intent_bridge_gap_minutes;
 } KAlgSleepParams;
 
 
@@ -246,6 +252,7 @@ static const KAlgSleepParams KALG_SLEEP_PARAMS = {
   .min_sleep_len_for_active_pct_check = 39,
     .min_short_sleep_cycle_len_minutes = 10,
     .max_fragmented_sleep_gap_minutes = 30,
+    .max_intent_bridge_gap_minutes = 90,
 };
 #else
 static const KAlgSleepParams KALG_SLEEP_PARAMS = {
@@ -266,6 +273,7 @@ static const KAlgSleepParams KALG_SLEEP_PARAMS = {
   .min_sleep_len_for_active_pct_check = 39,
     .min_short_sleep_cycle_len_minutes = 10,
     .max_fragmented_sleep_gap_minutes = 30,
+    .max_intent_bridge_gap_minutes = 90,
 };
 #endif
 
@@ -1791,9 +1799,10 @@ static bool prv_sleep_activity_update_stats(KAlgState *alg_state, time_t utc_now
     state->current_stats.consecutive_awake_intent_minutes = 0;
     state->current_stats.num_non_zero_awake_tail = 0;
     state->current_stats.vmc_sum_awake_tail = 0;
+    state->current_stats.definitely_not_worn_awake_tail = 0;
+    state->current_stats.not_worn_awake_tail = 0;
 #ifdef CONFIG_HRM
     state->current_stats.worn_evidence_awake_tail = 0;
-    state->current_stats.definitely_not_worn_awake_tail = 0;
 #endif
   } else {
     state->current_stats.consecutive_sleep_minutes = 0;
@@ -1804,6 +1813,8 @@ static bool prv_sleep_activity_update_stats(KAlgState *alg_state, time_t utc_now
     state->current_stats.consecutive_sleep_definitely_not_worn_minutes = 0;
 #endif
     state->current_stats.consecutive_awake_intent_minutes += sleep_intent_hint;
+    state->current_stats.definitely_not_worn_awake_tail += definitely_not_worn;
+    state->current_stats.not_worn_awake_tail += not_worn;
   }
   if (score > params->min_valid_vmc) {
     // If there is any movememnt at all, increment the "non-zero" minutes count.
@@ -1905,9 +1916,10 @@ static void prv_sleep_activity_update_session_state(
 #endif
       state->current_stats.num_non_zero_awake_tail = 0;
       state->current_stats.vmc_sum_awake_tail = 0;
+      state->current_stats.definitely_not_worn_awake_tail = 0;
+      state->current_stats.not_worn_awake_tail = 0;
 #ifdef CONFIG_HRM
       state->current_stats.worn_evidence_awake_tail = 0;
-      state->current_stats.definitely_not_worn_awake_tail = 0;
 #endif
 
       KALG_LOG_DEBUG("Detected bedtime at %s", prv_log_time(alg_state,
@@ -1988,6 +2000,66 @@ static bool prv_cycle_is_adjacent(time_t cycle_start_utc, time_t anchor_end_utc)
   return (anchor_end_utc != KALG_START_TIME_NONE) && (cycle_start_utc >= anchor_end_utc) &&
          (cycle_start_utc <=
           anchor_end_utc + (params->max_fragmented_sleep_gap_minutes * SECONDS_PER_MINUTE));
+}
+
+// ------------------------------------------------------------------------------------------
+static void prv_clear_intent_bridge(KAlgSleepActivityState *state) {
+  state->intent_bridge_start_utc = KALG_START_TIME_NONE;
+  state->intent_bridge_end_utc = KALG_START_TIME_NONE;
+  state->intent_bridge_continuity_valid = false;
+}
+
+// ------------------------------------------------------------------------------------------
+static bool prv_cycle_is_within_intent_bridge(const KAlgSleepActivityState *state,
+                                              time_t cycle_start_utc) {
+  const KAlgSleepParams *params = &KALG_SLEEP_PARAMS;
+  return state->intent_bridge_continuity_valid &&
+         (cycle_start_utc >= state->intent_bridge_end_utc) &&
+         (cycle_start_utc <=
+          state->intent_bridge_end_utc +
+              (params->max_intent_bridge_gap_minutes * SECONDS_PER_MINUTE));
+}
+
+// ------------------------------------------------------------------------------------------
+static bool prv_intent_bridge_wake_tail_is_continuous(const KAlgSleepActivityState *state) {
+  const KAlgSleepActivityStats *stats = &state->current_stats;
+  return (stats->consecutive_awake_intent_minutes == stats->consecutive_awake_minutes) &&
+         (stats->definitely_not_worn_awake_tail == 0) && (stats->not_worn_awake_tail == 0);
+}
+
+// ------------------------------------------------------------------------------------------
+static void prv_arm_intent_bridge(KAlgSleepActivityState *state, time_t start_utc,
+                                  time_t end_utc) {
+  state->intent_bridge_start_utc = start_utc;
+  state->intent_bridge_end_utc = end_utc;
+  state->intent_bridge_continuity_valid = true;
+}
+
+// ------------------------------------------------------------------------------------------
+static void prv_update_intent_bridge_continuity(KAlgSleepActivityState *state, time_t sample_utc,
+                                                bool sleep_intent_hint, bool definitely_not_worn,
+                                                bool not_worn) {
+  if (state->intent_bridge_start_utc == KALG_START_TIME_NONE ||
+      sample_utc < state->intent_bridge_end_utc) {
+    return;
+  }
+  if (!sleep_intent_hint || definitely_not_worn || not_worn) {
+    prv_clear_intent_bridge(state);
+  }
+}
+
+// ------------------------------------------------------------------------------------------
+static void prv_expire_intent_bridge(KAlgSleepActivityState *state, time_t sample_utc) {
+  const KAlgSleepParams *params = &KALG_SLEEP_PARAMS;
+  if (state->intent_bridge_start_utc == KALG_START_TIME_NONE ||
+      sample_utc <= state->intent_bridge_end_utc +
+                        (params->max_intent_bridge_gap_minutes * SECONDS_PER_MINUTE)) {
+    return;
+  }
+  if (state->current_stats.start_time == KALG_START_TIME_NONE ||
+      !prv_cycle_is_within_intent_bridge(state, state->current_stats.start_time)) {
+    prv_clear_intent_bridge(state);
+  }
 }
 
 // ------------------------------------------------------------------------------------------
@@ -2090,6 +2162,11 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
                  sleep_intent_hint, &score, &sample_utc, &is_sleep_minute, &not_worn)) {
     return;
   }
+  if (!shutting_down) {
+    const KAlgSleepMinute *centered_sample = &state->minute_history[KALG_SLEEP_HALF_WIDTH];
+    prv_update_intent_bridge_continuity(state, sample_utc, centered_sample->sleep_intent_hint,
+                                        centered_sample->definitely_not_worn, not_worn);
+  }
 
   if (!shutting_down) {
     alg_state->sleep_diagnostics = (KAlgSleepDiagnostics){
@@ -2120,6 +2197,9 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
                                           minutes_since_sleep_started, shutting_down, sessions_cb,
                                           context, &sleep_end_time, &reject_session,
                                           &rejection_flags);
+  if (!shutting_down) {
+    prv_expire_intent_bridge(state, sample_utc);
+  }
 
   if (!shutting_down) {
     if (session_was_active || state->current_stats.start_time != KALG_START_TIME_NONE) {
@@ -2238,20 +2318,49 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
       PBL_LOG_DBG("Detected valid sleep cycle of len %d, starting at %s",
               session_len_m, prv_log_time(alg_state, state->current_stats.start_time));
 
-      sessions_cb(context, KAlgActivityType_Sleep, state->current_stats.start_time,
-                  session_len_m * SECONDS_PER_MINUTE, false /*ongoing*/, false /*delete*/,
-                  0 /*steps*/, 0 /*resting_calories*/, 0 /*active_calories*/, 0 /*distane_mm*/);
+      const bool is_intent_backed_cycle = has_sleep_intent;
+      const bool can_start_intent_bridge = is_long_cycle && is_intent_backed_cycle;
+      const bool qualifies_for_intent_bridge =
+          is_intent_backed_cycle &&
+          prv_cycle_is_within_intent_bridge(state, state->current_stats.start_time);
+      if (qualifies_for_intent_bridge) {
+        const time_t bridge_start_utc = state->intent_bridge_start_utc;
+        const uint16_t bridge_len_m =
+            (sleep_end_time - bridge_start_utc) / SECONDS_PER_MINUTE;
+        sessions_cb(context, KAlgActivityType_Sleep, bridge_start_utc,
+                    state->intent_bridge_end_utc - bridge_start_utc, true /*ongoing*/,
+                    true /*delete*/, 0 /*steps*/, 0 /*resting_calories*/, 0 /*active_calories*/,
+                    0 /*distance_mm*/);
+        sessions_cb(context, KAlgActivityType_Sleep, bridge_start_utc,
+                    bridge_len_m * SECONDS_PER_MINUTE, false /*ongoing*/, false /*delete*/,
+                    0 /*steps*/, 0 /*resting_calories*/, 0 /*active_calories*/, 0 /*distance_mm*/);
+        state->summary_stats = (KAlgOngoingSleepStats) {
+          .sleep_start_utc = bridge_start_utc,
+          .uncertain_start_utc = 0,
+          .sleep_len_m = bridge_len_m,
+        };
+        state->confirmed_cycle_end_utc = sleep_end_time;
+        prv_arm_intent_bridge(state, bridge_start_utc, sleep_end_time);
+      } else {
+        sessions_cb(context, KAlgActivityType_Sleep, state->current_stats.start_time,
+                    session_len_m * SECONDS_PER_MINUTE, false /*ongoing*/, false /*delete*/,
+                    0 /*steps*/, 0 /*resting_calories*/, 0 /*active_calories*/, 0 /*distane_mm*/);
+        state->summary_stats = (KAlgOngoingSleepStats) {
+          .sleep_start_utc = state->current_stats.start_time,
+          .uncertain_start_utc = 0,
+          .sleep_len_m = session_len_m,
+        };
+        state->confirmed_cycle_end_utc = sleep_end_time;
+        if (can_start_intent_bridge && prv_intent_bridge_wake_tail_is_continuous(state)) {
+          prv_arm_intent_bridge(state, state->current_stats.start_time, sleep_end_time);
+        } else {
+          prv_clear_intent_bridge(state);
+        }
+      }
 
       // Inform the deep sleep detection logic that the sleep session just ended
       prv_deep_sleep_update(alg_state, sample_utc, score, KAlgDeepSleepAction_End,
                             true /*ok_to_register*/, sessions_cb, context);
-      // Update summary stats
-      state->summary_stats = (KAlgOngoingSleepStats) {
-        .sleep_start_utc = state->current_stats.start_time,
-        .uncertain_start_utc = 0,
-        .sleep_len_m = session_len_m,
-      };
-      state->confirmed_cycle_end_utc = sleep_end_time;
 
     } else {
       if (!shutting_down) {
@@ -2290,11 +2399,13 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
           alg_state->sleep_diagnostics.flags |= pending_flags;
         }
 
-        // Register ongoing sleep if we are in sleep
-        sessions_cb(context, KAlgActivityType_Sleep, state->current_stats.start_time,
-                    minutes_since_sleep_started * SECONDS_PER_MINUTE, true /*ongoing*/,
-                    false /*delete*/, 0 /*steps*/, 0 /*resting_calories*/, 0 /*active_calories*/,
-                    0 /*distane_mm*/);
+        // Keep the registered parent intact while an in-range bridge candidate is pending.
+        if (!prv_cycle_is_within_intent_bridge(state, state->current_stats.start_time)) {
+          sessions_cb(context, KAlgActivityType_Sleep, state->current_stats.start_time,
+                      minutes_since_sleep_started * SECONDS_PER_MINUTE, true /*ongoing*/,
+                      false /*delete*/, 0 /*steps*/, 0 /*resting_calories*/, 0 /*active_calories*/,
+                      0 /*distane_mm*/);
+        }
 
         // Update summary stats
         state->summary_stats.sleep_start_utc = state->current_stats.start_time;
