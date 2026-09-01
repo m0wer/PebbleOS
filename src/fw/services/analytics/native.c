@@ -13,6 +13,7 @@
 #include "pbl/kernel/compiler.h"
 #include "pbl/util/build_id.h"
 #include "pbl/util/math.h"
+#include "pbl/util/size.h"
 #include "pbl/util/uuid.h"
 
 PBL_LOG_MODULE_DEFINE(service_analytics, CONFIG_SERVICE_ANALYTICS_LOG_LEVEL);
