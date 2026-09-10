@@ -4,7 +4,7 @@
 #include <math.h>
 #include <stdint.h>
 
-#include "FreeRTOS.h"
+#include "pbl/kernel/irq.h"
 
 #include "board/board.h"
 #include <pbl/drivers/battery.h>
@@ -95,14 +95,14 @@ static RtcTicks s_last_log;
 static bool s_charger_enabled;
 
 static void prv_track_current_sample(int32_t current_ua) {
-  portENTER_CRITICAL();
+  pbl_irq_lock();
   s_last_current_ua = current_ua;
   s_analytics_current_sum_ua += current_ua;
   if (s_analytics_current_sample_count == 0 || current_ua > s_analytics_current_peak_ua) {
     s_analytics_current_peak_ua = current_ua;
   }
   s_analytics_current_sample_count++;
-  portEXIT_CRITICAL();
+  pbl_irq_unlock();
 }
 
 #if FUEL_GAUGE_STATEFUL
@@ -628,7 +628,7 @@ void pbl_analytics_external_collect_battery(void) {
   int32_t d_mv;
   uint32_t d_soc_cpct;
 
-  portENTER_CRITICAL();
+  pbl_irq_lock();
   battery_current_ua = s_last_current_ua;
   current_sum_ua = s_analytics_current_sum_ua;
   battery_current_peak_ua = s_analytics_current_peak_ua;
@@ -636,7 +636,7 @@ void pbl_analytics_external_collect_battery(void) {
   s_analytics_current_sum_ua = 0;
   s_analytics_current_peak_ua = 0;
   s_analytics_current_sample_count = 0;
-  portEXIT_CRITICAL();
+  pbl_irq_unlock();
 
   battery_current_avg_ua =
       current_sample_count ? (int32_t)(current_sum_ua / current_sample_count) : battery_current_ua;

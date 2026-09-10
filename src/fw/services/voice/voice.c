@@ -665,15 +665,15 @@ unlock:
 }
 
 bool voice_is_recording_session(void) {
-  mutex_lock(s_lock);
+  pbl_mutex_lock(&s_lock, PBL_FOREVER);
   const bool is_recording = (s_session_type == VoiceEndpointSessionTypeRecording);
-  mutex_unlock(s_lock);
+  pbl_mutex_unlock(&s_lock);
   return is_recording;
 }
 
 void voice_handle_recording_result(VoiceEndpointResult result, AudioEndpointSessionId session_id,
                                    bool app_initiated, Uuid *app_uuid) {
-  mutex_lock(s_lock);
+  pbl_mutex_lock(&s_lock, PBL_FOREVER);
 
   if (s_session_type != VoiceEndpointSessionTypeRecording) {
     result = VoiceEndpointResultFailInvalidMessage;
@@ -687,7 +687,7 @@ void voice_handle_recording_result(VoiceEndpointResult result, AudioEndpointSess
 
 unlock:
   prv_reset();
-  mutex_unlock(s_lock);
+  pbl_mutex_unlock(&s_lock);
 }
 
 // receiving this ends the session, sending an event to the main task with the result

@@ -12,7 +12,7 @@
 #include <pbl/drivers/rtc.h>
 #include "kernel/events.h"
 #include "kernel/pbl_malloc.h"
-#include "pbl/os/mutex.h"
+#include "pbl/kernel/mutex.h"
 #include "pbl/services/comm_session/session.h"
 #include "pbl/services/comm_session/session_send_buffer.h"
 #include "pbl/services/new_timer/new_timer.h"
@@ -96,7 +96,7 @@ typedef struct {
 } PersistBackupState;
 
 static PersistBackupState s_state;
-static PebbleMutex *s_mutex;
+static PBL_MUTEX_DEFINE(s_mutex);
 static TimerID s_timeout_timer;
 static uint32_t s_next_authorization_request_id;
 
@@ -125,11 +125,11 @@ static void prv_read_uuid(Uuid *uuid, const uint8_t *data) {
 }
 
 static void prv_lock(void) {
-  mutex_lock(s_mutex);
+  pbl_mutex_lock(&s_mutex, PBL_FOREVER);
 }
 
 static void prv_unlock(void) {
-  mutex_unlock(s_mutex);
+  pbl_mutex_unlock(&s_mutex);
 }
 
 static void prv_send(CommSession *session, uint8_t command, uint16_t request_id,
@@ -869,9 +869,6 @@ void persist_backup_endpoint_handle_comm_session_event(const PebbleCommSessionEv
 }
 
 void persist_backup_endpoint_init(void) {
-  if (!s_mutex) {
-    s_mutex = mutex_create();
-  }
   if (s_timeout_timer == TIMER_INVALID_ID) {
     s_timeout_timer = new_timer_create();
   }
