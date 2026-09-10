@@ -616,7 +616,7 @@ bool activity_metrics_prv_is_hrm_offwrist(time_t now_utc) {
 bool activity_metrics_prv_is_hrm_worn(time_t now_utc) {
   ActivityState *state = activity_private_state();
   bool worn = false;
-  mutex_lock_recursive(state->mutex);
+  pbl_mutex_lock(&state->mutex, PBL_FOREVER);
   {
     if (state->hr.last_quality_event_utc != 0 && !state->hr.last_quality_was_offwrist &&
         now_utc >= state->hr.last_quality_event_utc &&
@@ -624,7 +624,7 @@ bool activity_metrics_prv_is_hrm_worn(time_t now_utc) {
       worn = true;
     }
   }
-  mutex_unlock_recursive(state->mutex);
+  pbl_mutex_unlock(&state->mutex);
   return worn;
 }
 #endif

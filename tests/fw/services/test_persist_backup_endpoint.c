@@ -10,7 +10,7 @@
 
 #include "kernel/events.h"
 #include "kernel/pbl_malloc.h"
-#include "pbl/os/mutex.h"
+#include "stubs_mutex.h"
 #include "pbl/services/comm_session/session.h"
 #include "pbl/services/comm_session/session_send_buffer.h"
 #include "pbl/services/new_timer/new_timer.h"
@@ -59,14 +59,6 @@ void *kernel_malloc(size_t bytes) {
 void kernel_free(void *ptr) {
   free(ptr);
 }
-
-PebbleMutex *mutex_create(void) {
-  return (PebbleMutex *)1;
-}
-
-void mutex_lock(PebbleMutex *mutex) {}
-
-void mutex_unlock(PebbleMutex *mutex) {}
 
 static uint16_t prv_u16(const uint8_t *data) {
   return ((uint16_t)data[0] << 8) | data[1];
