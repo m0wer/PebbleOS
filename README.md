@@ -18,7 +18,6 @@ and [contributing](https://github.com/coredevices/PebbleOS/blob/main/CONTRIBUTIN
   ([upstream issue #1595](https://github.com/coredevices/PebbleOS/issues/1595)).
 - Expose raw voice recording sessions to applications
   ([upstream PR #1035](https://github.com/coredevices/PebbleOS/pull/1035)).
-- Build Moddable host utilities without a graphical session (`publish/headless-moddable-tools`).
 - Export sleep-classification diagnostics for analysis (`publish/sleep-diagnostics`).
 - Add app-data backup support for [PebbleApp](https://github.com/m0wer/PebbleApp).
 
