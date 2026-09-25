@@ -973,9 +973,6 @@ static uint32_t PBL_NOINLINE prv_fill_minute_record(time_t utc_sec, AlgMinuteDLS
   m_rec->heart_rate_total_weight_x100 = (uint16_t)heart_rate_total_weight_x100;
   m_rec->heart_rate_zone = activity_metrics_prv_get_hr_zone();
 
-  // Fill in any SpO2 reading taken this minute (0 = none)
-  activity_metrics_prv_get_spo2_sample(&m_rec->spo2_percent, &m_rec->spo2_quality);
-
   return minute_distance_mm;
 }
 
@@ -1017,7 +1014,7 @@ static void prv_activity_update_states(time_t utc_sec, AlgMinuteRecord *record_o
 #endif
   const bool not_worn = m_rec->base.plugged_in || hrm_offwrist;
 
-  ACTIVITY_LOG_DEBUG("minute handler: steps: %" PRIu8 ", orientation: 0x%" PRIx8 ", vmc: %" PRIu16
+  PBL_LOG_DBG("minute handler: steps: %" PRIu8 ", orientation: 0x%" PRIx8 ", vmc: %" PRIu16
                      ", "
                      "light: %" PRIu8 ", plugged_in: %d, hrm_offwrist: %d",
                      m_rec->base.steps, m_rec->base.orientation, m_rec->base.vmc, m_rec->base.light,

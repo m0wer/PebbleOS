@@ -288,4 +288,3 @@ typedef struct PBL_PACKED {
     uint8_t byte15;
   } uuid; //!< The process's UUID
 } LegacyPebbleAppInfo;
-

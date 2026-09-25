@@ -1546,7 +1546,7 @@ static bool prv_not_worn_during_session(KAlgState *alg_state, time_t session_sta
 #else
       (void)allow_worn_override;
 #endif
-      KALG_LOG_DEBUG("detected not worn from %s for %"PRIu16" minutes",
+      PBL_LOG_DBG("detected not worn from %s for %"PRIu16" minutes",
                      prv_log_time(alg_state, state->potential_not_worn_start[i]),
                      state->potential_not_worn_len_m[i]);
       return true;
@@ -1946,7 +1946,7 @@ static void prv_sleep_activity_update_session_state(
       *sleep_end_time = sample_utc;
       *reject_session = true;
       *rejection_flags |= KAlgSleepDiagnosticFlag_RejectedMotionQuality;
-      KALG_LOG_DEBUG("Cycle rejected because too many non-zero minutes (%d pct)",
+      PBL_LOG_DBG("Cycle rejected because too many non-zero minutes (%d pct)",
                      pct_non_zero);
 
     } else if ((motion_quality_minutes > params->min_sleep_len_for_active_pct_check) &&
@@ -1956,7 +1956,7 @@ static void prv_sleep_activity_update_session_state(
       *sleep_end_time = sample_utc;
       *reject_session = true;
       *rejection_flags |= KAlgSleepDiagnosticFlag_RejectedMotionQuality;
-      KALG_LOG_DEBUG("Cycle rejected because avg vmc is too high (%"PRIu16")", avg_vmc);
+      PBL_LOG_DBG("Cycle rejected because avg vmc is too high (%"PRIu16")", avg_vmc);
     } else if (shutting_down) {
       PBL_LOG_DBG("Cycle ended because we are shutting down");
       *sleep_end_time = sample_utc;
@@ -2221,7 +2221,7 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
                                     false /*ongoing*/, allow_worn_override)) {
       reject_session = true;
       rejection_flags |= KAlgSleepDiagnosticFlag_RejectedNotWorn;
-      KALG_LOG_DEBUG("Cycle rejected because not worn");
+      PBL_LOG_DBG("Cycle rejected because not worn");
     }
 
     const uint16_t sleep_intent_minutes =
@@ -2243,7 +2243,7 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
           (slept_pct_non_zero > params->max_active_minutes_pct)) {
         reject_session = true;
         rejection_flags |= KAlgSleepDiagnosticFlag_RejectedMotionQuality;
-        KALG_LOG_DEBUG("Short cycle rejected: avg vmc %" PRIu32 ", non-zero %u pct", slept_avg_vmc,
+        PBL_LOG_DBG("Short cycle rejected: avg vmc %" PRIu32 ", non-zero %u pct", slept_avg_vmc,
                        slept_pct_non_zero);
       }
     }
@@ -2266,7 +2266,7 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
       if (rejection_flags == 0) {
         rejection_flags |= KAlgSleepDiagnosticFlag_RejectedTooShort;
       }
-      KALG_LOG_DEBUG("Cycle rejected because too short");
+      PBL_LOG_DBG("Cycle rejected because too short");
     }
 
     if (!shutting_down) {
@@ -2343,7 +2343,7 @@ static void prv_sleep_activity_update(KAlgState *alg_state, time_t utc_now, uint
       if (!shutting_down) {
         alg_state->sleep_diagnostics.flags |= KAlgSleepDiagnosticFlag_SessionRejected;
       }
-      KALG_LOG_DEBUG("Cycle rejected");
+      PBL_LOG_DBG("Cycle rejected");
       const uint16_t pending_flags =
           prv_resolve_pending_cycle(alg_state, false /*following_cycle_kept*/, sessions_cb, context);
       if (!shutting_down) {

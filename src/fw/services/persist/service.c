@@ -99,7 +99,7 @@ static inline void prv_unlock(void) {
 #ifdef CONFIG_SERVICE_PERSIST_BACKUP_ENDPOINT
 #define PERSIST_ROLLBACK_FILE_NAME "psrb"
 
-typedef struct PACKED {
+typedef struct PBL_PACKED {
   uint32_t magic;
   Uuid uuid;
   uint32_t record_count;

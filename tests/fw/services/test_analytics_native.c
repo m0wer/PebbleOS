@@ -10,7 +10,7 @@
 #include "pbl/services/analytics/analytics.h"
 #include "pbl/services/analytics/backend.h"
 #include "pbl/services/data_logging/data_logging_service.h"
-#include "pbl/util/attributes.h"
+#include "pbl/kernel/compiler.h"
 #include "pbl/util/build_id.h"
 
 #include "stubs_logging.h"
@@ -18,7 +18,7 @@
 #include "stubs_passert.h"
 #include "stubs_prompt.h"
 
-typedef struct PACKED {
+typedef struct PBL_PACKED {
   uint8_t version;
   uint64_t timestamp;
   uint8_t build_id[BUILD_ID_EXPECTED_LEN];

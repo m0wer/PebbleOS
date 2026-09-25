@@ -14,7 +14,7 @@ typedef struct CommSession CommSession;
 // field indicating which endpoints it has support for over the deprecated ones.
 typedef struct PBL_PACKED {
   union {
-    struct PACKED {
+    struct PBL_PACKED {
       bool run_state_support:1;
       bool infinite_log_dumping_support:1;
       bool extended_music_service:1;

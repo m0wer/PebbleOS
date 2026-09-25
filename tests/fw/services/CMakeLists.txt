@@ -103,6 +103,7 @@ pbl_clar_test(test_imaging
 pbl_clar_test(test_analytics_native
   SOURCES
     src/fw/services/analytics/native.c
+    tests/fakes/fake_rtc.c
 )
 
 pbl_clar_test(test_compass_cal
