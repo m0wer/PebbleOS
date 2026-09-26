@@ -6,4 +6,3 @@ pbl_library_sources(
   endpoint.c
   confirmation.c
 )
-pbl_service_gettext(persist_backup_endpoint confirmation.c)
